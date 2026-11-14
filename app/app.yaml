@@ -9,3 +9,7 @@ env:
     value: the_curve
   - name: LAKEBASE_ENDPOINT
     value: projects/the-curve-ledger/branches/production/endpoints/primary
+  # Demo mode: sign-in links are shown on screen (no email). Acceptable ONLY because Databricks Apps already
+  # restricts this app to workspace members. Remove before any public deployment (see CLAUDE.md, Accounts and login).
+  - name: DEMO_LOGIN
+    value: "1"
