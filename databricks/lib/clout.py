@@ -74,6 +74,18 @@ def sell_proceeds(q: Sequence[float], i: int, shares: float, b: float = DEFAULT_
     return -cost_to_buy(q, i, -shares, b)
 
 
+def shares_for_proceeds(q: Sequence[float], i: int, amount: float, b: float = DEFAULT_B) -> float:
+    """Shares of outcome i to sell to receive exactly `amount` Clout (inverse of sell_proceeds, closed form).
+
+    k = -b * ln(1 - (S/E_i) * (1 - e^(-a/b))). NaN if the market can't pay that much for outcome i.
+    """
+    if amount <= 0:
+        return 0.0
+    _, e = _lse(q, b)
+    x = -(sum(e) / e[i]) * -math.expm1(-amount / b)
+    return -b * math.log1p(x) if x > -1 else math.nan
+
+
 def apply_sell(q: Sequence[float], i: int, shares: float, b: float = DEFAULT_B):
     """Return (new_q, proceeds, post_trade_price_of_i)."""
     proceeds = sell_proceeds(q, i, shares, b)

@@ -38,7 +38,7 @@ async function Portfolio({ searchParams }: { searchParams: Promise<Record<string
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <Card label="Clout" value={<Clout value={s.clout} />} hint="available + held at cost" />
-        <Card label="Available" value={s.available.toFixed(1)} hint="ready to bet" />
+        <Card label="Available" value={Math.floor(s.available).toLocaleString()} hint="ready to bet" />
         <Card label="Positions value" value={s.positions_value.toFixed(1)} hint="at current odds" />
         <Card label="Unrealized P&L" value={<Pnl v={s.unrealized} />} hint="if you sold at current odds" />
         <Card label="Realized P&L" value={<Pnl v={s.realized} />} hint="vs your starting 100" />

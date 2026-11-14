@@ -36,6 +36,11 @@ class TestVectors(unittest.TestCase):
             self.assertEqual(q2, v["new_q"])
         for v in V["round_trip"]:  # buy then sell the same shares: get the stake back
             self.assertTrue(math.isclose(v["proceeds"], v["amount"], rel_tol=1e-9, abs_tol=1e-6))
+        for v in V["sell_for"]:  # selling for an exact amount returns exactly that amount
+            k = c.shares_for_proceeds(v["q"], v["i"], v["amount"], v["b"])
+            self.assertTrue(close(k, v["shares"]))
+            self.assertTrue(math.isclose(c.sell_proceeds(v["q"], v["i"], k, v["b"]), v["amount"], rel_tol=1e-9, abs_tol=1e-6))
+        self.assertTrue(math.isnan(c.shares_for_proceeds([0, 0], 0, 10_000, 500)))  # more than the market can pay
         for v in V["sell_basis"]:
             self.assertTrue(close(c.sell_basis(v["basis"], v["position"], v["shares"]), v["removed"]))
 

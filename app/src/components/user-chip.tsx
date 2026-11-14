@@ -18,7 +18,7 @@ export async function UserChip() {
         Pick a username
       </Link>
     );
-  const clout = Math.round((u.clout + u.open_stake) * 10) / 10;
+  const clout = Math.round(u.clout + u.open_stake);
   return (
     <span className="flex items-center gap-1">
       <Link href="/portfolio" className="hidden rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-panel-2 hover:text-ink sm:block">

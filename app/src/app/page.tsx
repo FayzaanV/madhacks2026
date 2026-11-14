@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { PersonLine } from "@/components/avatar";
 import { Clout } from "@/components/clout";
 import { MarketCard } from "@/components/market-card";
 import { OddsChart } from "@/components/odds-chart";
@@ -9,7 +10,7 @@ import { oddsSeries } from "@/server/portfolio";
 import { querySql } from "@/server/warehouse";
 
 type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
-type Leader = { user_id: string; handle: string; clout: number; rank: number };
+type Leader = { user_id: string; handle: string; clout: number; rank: number; is_simulated: boolean };
 type SchoolRank = { school_id: string; short_name: string | null; color: string | null; avg_clout: number; rank: number };
 
 export default function Home({ searchParams }: PageProps<"/">) {
@@ -49,7 +50,8 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
       "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
     ).catch(() => [] as Gap[]),
     querySql<Leader>(
-      "SELECT user_id, handle, clout, rank FROM {catalog}.gold.leaderboard WHERE scope = 'overall' ORDER BY rank LIMIT 5",
+      `SELECT l.user_id, l.handle, l.clout, l.rank, c.is_simulated FROM {catalog}.gold.leaderboard l
+       JOIN {catalog}.gold.user_clout c USING (user_id) WHERE l.scope = 'overall' ORDER BY l.rank LIMIT 5`,
     ).catch(() => [] as Leader[]),
     querySql<SchoolRank>(
       "SELECT school_id, short_name, color, avg_clout, rank FROM {catalog}.gold.school_rankings ORDER BY rank LIMIT 5",
@@ -98,7 +100,9 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
                 <li key={l.user_id}>
                   <Link href={`/u/${l.user_id}`} className="flex items-center gap-3 py-1.5 text-sm hover:opacity-80">
                     <span className="tabular w-4 text-xs text-muted">{l.rank}</span>
-                    <span className="flex-1 truncate">@{l.handle}</span>
+                    <span className="flex-1 truncate">
+                      <PersonLine handle={l.handle} sim={l.is_simulated} />
+                    </span>
                     <Clout value={l.clout} className="text-sm" />
                   </Link>
                 </li>

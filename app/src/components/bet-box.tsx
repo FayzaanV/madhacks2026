@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { applySell, applyTrade } from "@/core/lmsr";
+import { applySell, applyTrade, sellProceeds, sharesForProceeds } from "@/core/lmsr";
 import { usePick } from "./trade-context";
 
 type Props = {
@@ -18,7 +18,8 @@ type Props = {
 };
 
 /**
- * Trade panel. Buy: pick an outcome and a Clout amount. Sell: sell shares you hold back to the market maker.
+ * Trade panel, whole Clout only. Buy: pick an outcome and how much Clout to spend. Sell: how much Clout to get back
+ * (the exact shares are solved with sharesForProceeds), or "Sell all" to close the position.
  * Previews use the shared LMSR core, so they match what the server will fill.
  */
 export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShares, available, holdings, initialSide = "buy" }: Props) {
@@ -26,23 +27,32 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
   const router = useRouter();
   const { pick, setPick } = usePick();
   const [side, setSide] = useState<"buy" | "sell">(initialSide);
-  const [amount, setAmount] = useState(0); // Clout when buying, shares when selling
+  const [amount, setAmount] = useState(0); // whole Clout: to spend (buy) or to receive (sell)
+  const [sellAll, setSellAll] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const chosen = outcomes[pick] ?? outcomes[0];
   const held = holdings[chosen.index] ?? 0;
   const selling = side === "sell";
-  const cap = selling ? held : (available ?? 0);
+  // What your whole position would fetch right now, and the most whole Clout you can ask for.
+  const worth = held > 0 ? sellProceeds(qShares, chosen.index, held, liquidityB) : 0;
+  const cap = selling ? Math.floor(worth + 1e-9) : Math.floor(available ?? 0);
 
   const preview = useMemo(() => {
+    if (selling && sellAll && held > 0) {
+      const r = applySell(qShares, chosen.index, held, liquidityB);
+      return { shares: held, clout: r.proceeds, postPrice: r.postPrice };
+    }
     if (!(amount > 0)) return null;
     if (selling) {
-      const r = applySell(qShares, chosen.index, Math.min(amount, held), liquidityB);
-      return { shares: Math.min(amount, held), clout: r.proceeds, postPrice: r.postPrice };
+      const k = sharesForProceeds(qShares, chosen.index, amount, liquidityB);
+      if (!Number.isFinite(k) || k > held + 1e-9) return null;
+      return { shares: k, clout: amount, postPrice: applySell(qShares, chosen.index, k, liquidityB).postPrice };
     }
     const r = applyTrade(qShares, chosen.index, amount, liquidityB);
     return { shares: r.shares, clout: amount, postPrice: r.postPrice };
-  }, [qShares, chosen.index, amount, liquidityB, selling, held]);
+  }, [qShares, chosen.index, amount, liquidityB, selling, sellAll, held]);
+  const tooMuch = selling && !sellAll && amount > cap;
 
   async function submit() {
     setBusy(true);
@@ -50,7 +60,11 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
     const res = await fetch(`/api/markets/${marketId}/trade`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(selling ? { side: "sell", outcome: chosen.index, shares: amount } : { outcome: chosen.index, amount }),
+      body: JSON.stringify(
+        selling
+          ? { side: "sell", outcome: chosen.index, ...(sellAll ? { all: true } : { clout: amount }) }
+          : { outcome: chosen.index, amount },
+      ),
     });
     const j = await res.json();
     setBusy(false);
@@ -64,14 +78,14 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
         : `Bought ${j.shares.toFixed(1)} shares of ${chosen.label}. ${move}`,
     });
     setAmount(0);
+    setSellAll(false);
     router.refresh();
   }
 
-  const add = (v: number) =>
-    setAmount((a) => {
-      const next = Math.round((a + v) * 10) / 10;
-      return available == null ? next : Math.min(next, Math.floor(cap * 10) / 10);
-    });
+  const add = (v: number) => {
+    setSellAll(false);
+    setAmount((a) => (available == null ? a + v : Math.min(a + v, cap)));
+  };
 
   return (
     <div className="rounded-2xl border border-line bg-panel p-4">
@@ -84,6 +98,7 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
             onClick={() => {
               setSide(sd);
               setAmount(0);
+              setSellAll(false);
               setMsg(null);
             }}
             className={`rounded-lg py-1.5 capitalize ${side === sd ? "bg-panel text-ink shadow-sm" : "text-muted hover:text-ink"}`}
@@ -131,27 +146,33 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
 
       <div className="mt-5 flex items-end justify-between">
         <div>
-          <div className="font-medium">{selling ? "Shares" : "Amount"}</div>
+          <div className="font-medium">{selling ? "Clout to receive" : "Amount"}</div>
           <div className="text-xs text-muted">
             {available == null
               ? "Sign in to bet"
               : selling
-                ? `You hold ${held.toFixed(1)} shares`
-                : `Available: ${remaining.toFixed(1)} Clout`}
+                ? `You hold ${held.toFixed(1)} shares, worth ${worth.toFixed(1)} Clout now`
+                : `Available: ${Math.floor(remaining)} Clout`}
           </div>
         </div>
         <label className="flex items-baseline gap-1">
           <input
             type="number"
-            inputMode="decimal"
+            inputMode="numeric"
             min={0}
-            value={amount || ""}
-            placeholder="0"
-            onChange={(e) => setAmount(Number(e.target.value))}
+            step={1}
+            value={sellAll ? "" : amount || ""}
+            placeholder={sellAll ? "All" : "0"}
+            onChange={(e) => {
+              setSellAll(false);
+              // Whole Clout only: drop anything after a decimal point as you type.
+              setAmount(Math.max(0, Math.floor(Number(e.target.value.replace(/[^0-9.]/g, "")) || 0)));
+            }}
+            onKeyDown={(e) => [".", ",", "e", "E", "-", "+"].includes(e.key) && e.preventDefault()}
             className="tabular w-28 bg-transparent text-right text-4xl font-bold outline-none placeholder:text-muted"
-            aria-label={selling ? "Shares to sell" : "Clout to stake"}
+            aria-label={selling ? "Whole Clout to receive" : "Whole Clout to stake"}
           />
-          <span className="text-sm text-muted">{selling ? "shares" : "Clout"}</span>
+          <span className="text-sm text-muted">Clout</span>
         </label>
       </div>
       <div className="mt-3 flex justify-end gap-1.5">
@@ -161,17 +182,25 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
           </button>
         ))}
         <button
-          onClick={() => setAmount(selling ? held : Math.floor(remaining * 10) / 10)}
-          className="rounded-lg border border-line px-2.5 py-1 text-xs font-semibold hover:border-accent"
+          onClick={() => {
+            if (selling) {
+              setSellAll(true);
+              setAmount(0);
+            } else setAmount(cap);
+          }}
+          className={`rounded-lg border px-2.5 py-1 text-xs font-semibold hover:border-accent ${selling && sellAll ? "border-accent text-accent" : "border-line"}`}
         >
-          Max
+          {selling ? "Sell all" : "Max"}
         </button>
       </div>
 
       {preview && (
         <dl className="tabular mt-4 space-y-1 rounded-xl bg-panel-2 p-3 text-sm">
           {selling ? (
-            <div className="flex justify-between"><dt className="text-muted">You receive</dt><dd className="font-semibold text-yes">{preview.clout.toFixed(1)} Clout</dd></div>
+            <>
+              <div className="flex justify-between"><dt className="text-muted">You receive</dt><dd className="font-semibold text-yes">{sellAll ? preview.clout.toFixed(2) : preview.clout} Clout</dd></div>
+              <div className="flex justify-between"><dt className="text-muted">Shares sold</dt><dd>{preview.shares.toFixed(2)} of {held.toFixed(2)}</dd></div>
+            </>
           ) : (
             <>
               <div className="flex justify-between"><dt className="text-muted">Shares</dt><dd>{preview.shares.toFixed(1)}</dd></div>
@@ -183,13 +212,19 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
         </dl>
       )}
 
+      {tooMuch && (
+        <p className="mt-3 text-sm text-no">
+          {cap >= 1 ? `Your shares are worth at most ${cap} Clout right now. Ask for less, or use Sell all.` : "Your shares are worth less than 1 Clout. Use Sell all."}
+        </p>
+      )}
+
       {available == null ? (
         <a href="/login" className="mt-4 block w-full rounded-xl bg-accent py-3 text-center font-semibold text-accent-ink">
           Sign in to bet
         </a>
       ) : (
         <button
-          disabled={busy || !(amount > 0) || (selling && held <= 0)}
+          disabled={busy || (selling ? held <= 0 || !preview : !(amount > 0))}
           onClick={submit}
           className="mt-4 w-full rounded-xl bg-accent py-3 font-semibold text-accent-ink transition hover:brightness-110 disabled:opacity-40"
         >
@@ -198,9 +233,11 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
             : selling
               ? held <= 0
                 ? `No ${chosen.label} shares to sell`
-                : amount > 0
-                  ? `Sell ${Math.min(amount, held).toFixed(1)} shares`
-                  : "Enter shares"
+                : sellAll
+                  ? `Sell all ${chosen.label} (${worth.toFixed(1)} Clout)`
+                  : amount > 0
+                    ? `Sell for ${amount} Clout`
+                    : "Enter whole Clout"
               : amount > 0
                 ? `Bet ${amount} Clout`
                 : "Enter an amount"}

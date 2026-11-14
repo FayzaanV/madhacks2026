@@ -44,6 +44,15 @@ for case in sell_cases:
     q, b, i, k = case["q"], case["b"], case["i"], case["shares"]
     q2, proceeds, post = c.apply_sell(q, i, k, b)
     sell.append({**case, "proceeds": proceeds, "new_q": q2, "post_price": post})
+# Selling for an exact whole-Clout amount: shares_for_proceeds is the inverse of sell_proceeds.
+sell_for = []
+for case in [{"q": [200, 0], "b": 500, "i": 0, "amount": 3},
+             {"q": [300, -50], "b": 500, "i": 0, "amount": 40},
+             {"q": [90, 10, 0, 0], "b": 300, "i": 1, "amount": 7},
+             {"q": [5000, 0], "b": 100, "i": 0, "amount": 12}]:
+    q, b, i, a = case["q"], case["b"], case["i"], case["amount"]
+    k = c.shares_for_proceeds(q, i, a, b)
+    sell_for.append({**case, "shares": k, "proceeds": c.sell_proceeds(q, i, k, b)})
 round_trip = []
 for case in lmsr_cases:
     q, b, i, a = case["q"], case["b"], case["i"], case["amount"]
@@ -56,6 +65,7 @@ vectors = {
     "lmsr": lmsr,
     "sell": sell,
     "round_trip": round_trip,
+    "sell_for": sell_for,
     "sell_basis": [{"basis": bs, "position": p, "shares": k, "removed": c.sell_basis(bs, p, k)}
                    for bs, p, k in [(50, 100, 25), (50, 100, 100), (50, 100, 150), (0, 0, 5), (12.5, 40, 0)]],
     "starting_clout": c.STARTING_CLOUT,

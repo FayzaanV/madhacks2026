@@ -1,9 +1,9 @@
-/** Clout everywhere: negative renders red. */
+/** Clout everywhere, as a whole number (the ledger keeps exact values): negative renders red. */
 export function Clout({ value, className = "" }: { value: number; className?: string }) {
-  const v = Math.round(value * 10) / 10;
+  const v = Math.round(value);
   return (
     <span className={`tabular font-semibold ${v < 0 ? "text-no" : ""} ${className}`}>
-      {v.toLocaleString(undefined, { maximumFractionDigits: 1 })} <span className="text-xs font-normal text-muted">Clout</span>
+      {v.toLocaleString()} <span className="text-xs font-normal text-muted">Clout</span>
     </span>
   );
 }

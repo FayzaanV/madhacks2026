@@ -48,6 +48,16 @@ export function applyTrade(q: readonly number[], i: number, amount: number, b = 
 export const sellProceeds = (q: readonly number[], i: number, shares: number, b = DEFAULT_B) =>
   shares <= 0 ? 0 : -costToBuy(q, i, -shares, b);
 
+/**
+ * Shares of outcome i to sell to receive exactly `amount` Clout (inverse of sellProceeds, closed form):
+ * k = -b * ln(1 - (S/E_i) * (1 - e^(-a/b))). NaN if the market can't pay that much for outcome i.
+ */
+export function sharesForProceeds(q: readonly number[], i: number, amount: number, b = DEFAULT_B): number {
+  if (amount <= 0) return 0;
+  const { e } = lse(q, b);
+  return -b * Math.log1p(-(sum(e) / e[i]) * -Math.expm1(-amount / b));
+}
+
 export function applySell(q: readonly number[], i: number, shares: number, b = DEFAULT_B) {
   const proceeds = sellProceeds(q, i, shares, b);
   const newQ = [...q];

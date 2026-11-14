@@ -4,7 +4,7 @@ import { AskAnalyst } from "@/components/ask-analyst";
 import { Avatar, PersonLine } from "@/components/avatar";
 import { BetBox } from "@/components/bet-box";
 import { Clout } from "@/components/clout";
-import { CommentBox } from "@/components/comment-box";
+import { CommentList } from "@/components/comment-list";
 import { MarketTabs, ProfileLink } from "@/components/market-tabs";
 import { OddsChart } from "@/components/odds-chart";
 import { OutcomeRows, PickProvider } from "@/components/trade-context";
@@ -13,7 +13,6 @@ import { getInsight } from "@/server/analyst";
 import { canResolve, getComments, getMarket } from "@/server/markets";
 import { marketActivity, oddsSeries, positions, topHolders, type Position } from "@/server/portfolio";
 import { ResolveBox } from "@/components/resolve-box";
-import { DeleteCommentButton } from "@/components/comment-box";
 import Link from "next/link";
 import { currentUser } from "@/server/user";
 
@@ -67,6 +66,20 @@ async function Market({
             </div>
           </header>
 
+          {market.winning_outcome_index != null ? (
+            <div className="rounded-2xl border border-yes bg-yes-soft p-4 text-sm">
+              <b>Resolved: {labels[market.winning_outcome_index]} won.</b> Each {labels[market.winning_outcome_index]} share paid 1 Clout.
+              {market.resolution_note && <p className="mt-1 text-muted">Source: {market.resolution_note}</p>}
+            </div>
+          ) : market.status === "voided" ? (
+            <div className="rounded-2xl border border-line bg-panel-2 p-4 text-sm"><b>Voided.</b> Everyone&apos;s net Clout in this market was returned.</div>
+          ) : (
+            market.status === "live" &&
+            market.past_close && (
+              <div className="rounded-2xl border border-line bg-panel-2 p-4 text-sm"><b>Trading closed</b> on {new Date(market.closes_at).toLocaleString()}. Awaiting resolution.</div>
+            )
+          )}
+
           <Suspense fallback={<div className="h-80 animate-pulse rounded-2xl border border-line bg-panel" />}>
             <Chart id={id} labels={labels} />
           </Suspense>
@@ -89,7 +102,7 @@ async function Market({
           </Suspense>
 
           <Suspense fallback={<p className="text-sm text-muted">Loading comments…</p>}>
-            <Comments id={id} me={user?.user_id ?? null} />
+            <Comments id={id} me={user ? { user_id: user.user_id, handle: user.handle, title: user.title, avatar_v: user.avatar_v, clout: user.clout + user.open_stake } : null} />
           </Suspense>
         </div>
 
@@ -112,7 +125,7 @@ async function Market({
           {user ? (
             <div className="rounded-2xl border border-line bg-panel p-4 text-sm">
               <div className="flex justify-between"><span className="text-muted">Your Clout</span><Clout value={user.clout + user.open_stake} /></div>
-              <div className="mt-1 flex justify-between"><span className="text-muted">Available to bet</span><span className="tabular">{user.clout.toFixed(1)}</span></div>
+              <div className="mt-1 flex justify-between"><span className="text-muted">Available to bet</span><span className="tabular">{Math.floor(user.clout)}</span></div>
               <Link href="/portfolio" className="mt-2 block text-xs font-semibold text-accent">View portfolio →</Link>
             </div>
           ) : (
@@ -170,9 +183,14 @@ async function Chart({ id, labels }: { id: string; labels: string[] }) {
   );
 }
 
-/** Everyone's bets: recent activity and top holders per outcome. */
+/** Everyone's bets: recent activity and top holders per outcome, with a "Real people only" filter. */
 async function Bets({ id, labels }: { id: string; labels: string[] }) {
-  const [activity, holders] = await Promise.all([marketActivity(id), topHolders(id)]);
+  const [activity, holders, realActivity, realHolders] = await Promise.all([
+    marketActivity(id),
+    topHolders(id),
+    marketActivity(id, true),
+    topHolders(id, true),
+  ]);
   return (
     <MarketTabs
       tabs={[
@@ -180,60 +198,70 @@ async function Bets({ id, labels }: { id: string; labels: string[] }) {
           id: "activity",
           label: "Activity",
           count: activity.length,
-          body: activity.length ? (
-            <ul className="divide-y divide-line text-sm">
-              {activity.map((a) => (
-                <li key={a.trade_id} className="flex items-center gap-3 py-2">
-                  <ProfileLink userId={a.user_id}>
-                    <Avatar userId={a.user_id} handle={a.handle} v={a.avatar_v} size={26} />
-                    <PersonLine handle={a.handle} title={a.title} />
-                  </ProfileLink>
-                  <span className="ml-auto shrink-0 text-right">
-                    <span className={a.side === "buy" ? "text-yes" : "text-no"}>{a.side === "buy" ? "Bought" : "Sold"}</span>{" "}
-                    <span className="tabular">{a.shares.toFixed(1)}</span> <b>{a.label}</b>{" "}
-                    <span className="tabular text-muted">@ {Math.round(a.price * 100)}¢ · {a.clout.toFixed(1)} Clout</span>
-                  </span>
-                  <span className="w-16 shrink-0 text-right text-xs text-muted">{ago(a.created_at)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-sm text-muted">No trades yet.</p>
-          ),
+          body: <ActivityList rows={activity} empty="No trades yet." />,
+          real: <ActivityList rows={realActivity} empty="No real bets yet. Be the first." />,
+          realCount: realActivity.length,
         },
         {
           id: "holders",
           label: "Top holders",
-          body: (
-            <div className={`grid gap-6 ${labels.length > 1 ? "sm:grid-cols-2" : ""}`}>
-              {labels.map((label, i) => {
-                const hs = holders.filter((h) => h.outcome_index === i);
-                return (
-                  <div key={i}>
-                    <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{label}</h3>
-                    {hs.length ? (
-                      <ol className="space-y-1.5 text-sm">
-                        {hs.map((h) => (
-                          <li key={h.user_id} className="flex items-center gap-2">
-                            <ProfileLink userId={h.user_id}>
-                              <Avatar userId={h.user_id} handle={h.handle} v={h.avatar_v} size={22} />
-                              <PersonLine handle={h.handle} title={h.title} />
-                            </ProfileLink>
-                            <span className="tabular ml-auto">{h.shares.toFixed(1)} shares</span>
-                          </li>
-                        ))}
-                      </ol>
-                    ) : (
-                      <p className="text-sm text-muted">Nobody yet.</p>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ),
+          body: <HolderGrid labels={labels} holders={holders} />,
+          real: <HolderGrid labels={labels} holders={realHolders} />,
         },
       ]}
     />
+  );
+}
+
+function ActivityList({ rows, empty }: { rows: Awaited<ReturnType<typeof marketActivity>>; empty: string }) {
+  if (!rows.length) return <p className="text-sm text-muted">{empty}</p>;
+  return (
+    <ul className="max-h-[420px] divide-y divide-line overflow-y-auto pr-1 text-sm">
+      {rows.map((a) => (
+        <li key={a.trade_id} className="flex items-center gap-3 py-2">
+          <ProfileLink userId={a.user_id}>
+            <Avatar userId={a.user_id} handle={a.handle} v={a.avatar_v} size={26} />
+            <PersonLine handle={a.handle} title={a.title} sim={a.is_simulated} />
+          </ProfileLink>
+          <span className="ml-auto shrink-0 text-right">
+            <span className={a.side === "buy" ? "text-yes" : "text-no"}>{a.side === "buy" ? "Bought" : "Sold"}</span>{" "}
+            <span className="tabular">{a.shares.toFixed(1)}</span> <b>{a.label}</b>{" "}
+            <span className="tabular text-muted">@ {Math.round(a.price * 100)}¢ · {Math.round(a.clout)} Clout</span>
+          </span>
+          <span className="w-16 shrink-0 text-right text-xs text-muted">{ago(a.created_at)}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function HolderGrid({ labels, holders }: { labels: string[]; holders: Awaited<ReturnType<typeof topHolders>> }) {
+  return (
+    <div className={`grid gap-6 ${labels.length > 1 ? "sm:grid-cols-2" : ""}`}>
+      {labels.map((label, i) => {
+        const hs = holders.filter((h) => h.outcome_index === i);
+        return (
+          <div key={i}>
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted">{label}</h3>
+            {hs.length ? (
+              <ol className="space-y-1.5 text-sm">
+                {hs.map((h) => (
+                  <li key={h.user_id} className="flex items-center gap-2">
+                    <ProfileLink userId={h.user_id}>
+                      <Avatar userId={h.user_id} handle={h.handle} v={h.avatar_v} size={22} />
+                      <PersonLine handle={h.handle} title={h.title} sim={h.is_simulated} />
+                    </ProfileLink>
+                    <span className="tabular ml-auto">{h.shares.toFixed(1)} shares</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="text-sm text-muted">Nobody yet.</p>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -242,28 +270,7 @@ async function Analyst({ id }: { id: string }) {
   return <AskAnalyst marketId={id} insight={insight} />;
 }
 
-async function Comments({ id, me }: { id: string; me: string | null }) {
-  const comments = await getComments(id);
-  return (
-    <section className="rounded-2xl border border-line bg-panel p-4">
-      <h2 className="font-semibold">Comments <span className="text-sm font-normal text-muted">{comments.length}</span></h2>
-      {me ? <CommentBox marketId={id} /> : <p className="mt-2 text-sm text-muted"><Link href="/login" className="text-accent">Sign in</Link> to comment.</p>}
-      <ul className="mt-3 divide-y divide-line">
-        {comments.map((c) => (
-          <li key={c.comment_id} className="flex gap-2.5 py-2.5 text-sm">
-            <Avatar userId={c.user_id} handle={c.handle} v={c.avatar_v} size={28} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center gap-2 text-xs">
-                <PersonLine handle={c.handle} title={c.title} />
-                <Clout value={c.clout} className="text-xs" />
-                <span className="text-muted">{new Date(c.created_at).toLocaleDateString()}</span>
-                {me === c.user_id && <DeleteCommentButton commentId={c.comment_id} />}
-              </div>
-              <p className="mt-0.5">{c.body}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
+async function Comments({ id, me }: { id: string; me: React.ComponentProps<typeof CommentList>["me"] }) {
+  const initial = await getComments(id);
+  return <CommentList marketId={id} initial={initial} me={me} />;
 }

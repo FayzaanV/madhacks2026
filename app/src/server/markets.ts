@@ -1,6 +1,6 @@
 import "server-only";
 import type { PoolClient } from "pg";
-import { applySell, applyTrade, prices } from "@/core/lmsr";
+import { applySell, applyTrade, DEFAULT_B, prices, sellProceeds, sharesForProceeds } from "@/core/lmsr";
 import { canAfford, netCloutChange, privileges, sellBasis } from "@/core/clout";
 import { triggerRefresh } from "./jobs";
 import { openStakeSql, q, tx } from "./ledger";
@@ -19,6 +19,9 @@ export type Market = {
   resolution_source: string | null;
   closes_at: string;
   is_simulated: boolean;
+  past_close: boolean; // trading has closed, awaiting resolution
+  winning_outcome_index: number | null;
+  resolution_note: string | null;
   n_trades: number;
   volume: number;
   outcomes: Outcome[];
@@ -31,12 +34,13 @@ function withPrices<T extends { liquidity_b: number; outcomes: Omit<Outcome, "pr
 
 const MARKET_SQL = `
   SELECT m.market_id, m.course, m.question, m.market_type, m.status, m.liquidity_b, m.resolution_source,
-         m.closes_at, m.is_simulated,
+         m.closes_at, m.is_simulated, m.closes_at < now() AS past_close,
+         r.winning_outcome_index, r.rationale AS resolution_note,
          (SELECT count(*)::int FROM trades t WHERE t.market_id = m.market_id) AS n_trades,
          (SELECT coalesce(sum(abs(clout_spent)), 0)::float FROM trades t WHERE t.market_id = m.market_id) AS volume,
          (SELECT json_agg(json_build_object('outcome_index', o.outcome_index, 'label', o.label, 'q_shares', o.q_shares)
                           ORDER BY o.outcome_index) FROM outcomes o WHERE o.market_id = m.market_id) AS outcomes
-  FROM markets m`;
+  FROM markets m LEFT JOIN resolutions r USING (market_id)`;
 
 /** Live markets from the Lakebase ledger, newest activity first. */
 export async function listMarkets(status = "live"): Promise<Market[]> {
@@ -55,18 +59,42 @@ export type Comment = {
   handle: string;
   title: string | null;
   avatar_v: number | null;
+  is_simulated: boolean;
   clout: number;
   body: string;
-  created_at: string;
+  created_at: string; // ISO with microseconds, so it doubles as a paging cursor
 };
-export async function getComments(id: string): Promise<Comment[]> {
-  return q<Comment>(
-    `SELECT c.comment_id, c.user_id, u.handle, u.title, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, c.body, c.created_at,
-            u.clout + ${openStakeSql("u.user_id")} AS clout
-     FROM comments c JOIN users u USING (user_id)
-     WHERE c.market_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at DESC LIMIT 30`,
-    [id],
-  );
+export type CommentPage = { comments: Comment[]; next: string | null; total: number };
+
+const COMMENT_PAGE = 50;
+
+/**
+ * Comments newest first, 50 per page. `before` is the `next` cursor from the previous page
+ * ("<created_at>|<comment_id>"), so older comments are paged in instead of silently dropped.
+ */
+export async function getComments(id: string, before?: string | null): Promise<CommentPage> {
+  const [ts, cid] = before ? before.split("|") : [null, null];
+  const [rows, total] = await Promise.all([
+    q<Comment>(
+      `SELECT c.comment_id, c.user_id, u.handle, u.title, u.is_simulated,
+              extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, c.body,
+              to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
+              u.clout + ${openStakeSql("u.user_id")} AS clout
+       FROM comments c JOIN users u USING (user_id)
+       WHERE c.market_id = $1 AND c.deleted_at IS NULL
+         AND ($2::timestamptz IS NULL OR (c.created_at, c.comment_id) < ($2::timestamptz, $3::text))
+       ORDER BY c.created_at DESC, c.comment_id DESC LIMIT ${COMMENT_PAGE + 1}`,
+      [id, ts, cid],
+    ),
+    q<{ n: number }>("SELECT count(*)::int AS n FROM comments WHERE market_id = $1 AND deleted_at IS NULL", [id]),
+  ]);
+  const page = rows.slice(0, COMMENT_PAGE);
+  const last = page.at(-1);
+  return {
+    comments: page,
+    next: rows.length > COMMENT_PAGE && last ? `${last.created_at}|${last.comment_id}` : null,
+    total: total[0]?.n ?? page.length,
+  };
 }
 
 /** Cost basis you still have in this market (what you paid for the shares you hold). */
@@ -113,9 +141,14 @@ function trade<T>(userId: string, marketId: string, outcomeIndex: number, fn: (t
   return tx(async (c) => {
     // FOR SHARE: trades run in parallel, but wait for (and then see) a resolution holding the row FOR UPDATE,
     // so no trade can land after resolveMarket has read the market's trades. Lock order: market, user, outcomes.
-    const m = (await c.query("SELECT status, liquidity_b, course FROM markets WHERE market_id = $1 FOR SHARE", [marketId])).rows[0];
+    const m = (
+      await c.query("SELECT status, liquidity_b, course, closes_at < now() AS past_close FROM markets WHERE market_id = $1 FOR SHARE", [
+        marketId,
+      ])
+    ).rows[0];
     if (!m) throw new TradeError("Market not found.", 404);
     if (m.status !== "live") throw new TradeError("This market is not open for trading.");
+    if (m.past_close) throw new TradeError("Trading has closed; this market is awaiting resolution.");
     const u = (await c.query("SELECT clout FROM users WHERE user_id = $1 FOR UPDATE", [userId])).rows[0];
     // Checked after the user row lock so parallel requests from one user can't slip past the limit.
     const recent = (
@@ -159,11 +192,10 @@ async function record(
 }
 
 /**
- * Buy: spend `amount` Clout on outcome i (you can't bet more than your balance). Each share pays 1 Clout if i wins.
+ * Buy: spend a whole number of Clout on outcome i (up to your balance). Each share pays 1 Clout if i wins.
  */
 export async function placeBuy(userId: string, marketId: string, outcomeIndex: number, amount: number) {
-  if (!(amount > 0) || !Number.isFinite(amount)) throw new TradeError("Bet must be a positive amount of Clout.");
-  amount = Math.round(amount * 100) / 100;
+  if (!Number.isInteger(amount) || amount < 1) throw new TradeError("Bet a whole number of Clout (1 or more).");
   return trade(userId, marketId, outcomeIndex, async (t) => {
     if (!canAfford(t.balance, amount))
       throw new TradeError(`You only have ${Math.max(0, t.balance).toFixed(1)} Clout available.`);
@@ -174,11 +206,13 @@ export async function placeBuy(userId: string, marketId: string, outcomeIndex: n
 }
 
 /**
- * Sell `shares` of outcome i back to the market maker at the LMSR price. Proceeds go to your balance now;
- * the position's average cost is removed from your open stake, so the difference is realized profit or loss.
+ * Sell outcome i back to the market maker at the LMSR price, either for a whole number of Clout (`clout`; the
+ * shares are solved exactly with sharesForProceeds) or the whole position (`"all"`, the only fractional case).
+ * Proceeds go to your balance now; the position's average cost leaves your open stake, so the difference is
+ * realized profit or loss.
  */
-export async function placeSell(userId: string, marketId: string, outcomeIndex: number, shares: number) {
-  if (!(shares > 0) || !Number.isFinite(shares)) throw new TradeError("Sell a positive number of shares.");
+export async function placeSell(userId: string, marketId: string, outcomeIndex: number, want: number | "all") {
+  if (want !== "all" && (!Number.isInteger(want) || want < 1)) throw new TradeError("Sell for a whole number of Clout (1 or more).");
   return trade(userId, marketId, outcomeIndex, async (t) => {
     const pos = (
       await t.c.query(
@@ -188,8 +222,21 @@ export async function placeSell(userId: string, marketId: string, outcomeIndex: 
       )
     ).rows[0] as { shares: number; basis: number };
     if (pos.shares <= 1e-9) throw new TradeError("You don't hold any shares of this outcome.");
-    const k = shares > pos.shares - 1e-6 ? pos.shares : shares; // "Max" sells the exact position
-    const { newQ, proceeds } = applySell(t.q0, outcomeIndex, k, t.liquidityB);
+    let k = pos.shares;
+    if (want !== "all") {
+      const need = sharesForProceeds(t.q0, outcomeIndex, want, t.liquidityB);
+      if (!Number.isFinite(need) || need > pos.shares + 1e-9) {
+        const most = Math.floor(sellProceeds(t.q0, outcomeIndex, pos.shares, t.liquidityB) + 1e-9);
+        throw new TradeError(
+          most >= 1
+            ? `Your shares are worth at most ${most} Clout right now. Sell for ${most} or less, or sell all.`
+            : "Your shares are worth less than 1 Clout right now. Use Sell all.",
+        );
+      }
+      k = Math.min(need, pos.shares);
+    }
+    const { newQ, proceeds: raw } = applySell(t.q0, outcomeIndex, k, t.liquidityB);
+    const proceeds = want === "all" ? raw : want; // exact by construction; avoid float dust in the ledger
     const removed = sellBasis(pos.basis, pos.shares, k);
     const r = await record(t, userId, marketId, outcomeIndex, {
       side: "sell",
@@ -268,9 +315,61 @@ export async function resolveMarket(
 const adminEmails = () =>
   (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
 
-/** 500+ true Clout (balance + open stake), or an admin email for demos where nobody has 500 yet. */
+/** Team admins (ADMIN_EMAILS, a Databricks secret on the app; never committed): can resolve and create markets. */
+export const isAdmin = (u: { email: string }) => adminEmails().includes(u.email.toLowerCase());
+
+/** 500+ true Clout (balance + open stake), or an admin. */
 export const canResolve = (u: { email: string; clout: number; open_stake: number }) =>
-  privileges(u.clout + u.open_stake).includes("resolve") || adminEmails().includes(u.email.toLowerCase());
+  privileges(u.clout + u.open_stake).includes("resolve") || isAdmin(u);
+
+export type NewMarket = {
+  question: string;
+  course: string;
+  market_type: "binary" | "multiple_choice";
+  outcomes?: string[]; // multiple choice only
+  closes_at: string; // ISO
+  resolution_source?: string;
+  liquidity_b?: number;
+  not_about_a_student: boolean;
+};
+
+/**
+ * Create a live market (admins only for now; proposals with upvotes come later). One transaction inserts the
+ * market and its outcomes at q = 0, so every outcome starts at an equal price.
+ */
+export async function createMarket(user: { user_id: string; email: string; school_id: string }, input: Partial<NewMarket>) {
+  if (!isAdmin(user)) throw new TradeError("Only admins can create markets right now.", 403);
+  const question = String(input.question ?? "").trim();
+  const course = String(input.course ?? "").trim().slice(0, 40) || "campus";
+  if (question.length < 10 || question.length > 200) throw new TradeError("Questions are 10–200 characters.");
+  if (!input.not_about_a_student) throw new TradeError("Markets can't be about individual students. Confirm the box.");
+  const type = input.market_type === "multiple_choice" ? "multiple_choice" : "binary";
+  const labels =
+    type === "binary"
+      ? ["Yes", "No"]
+      : [...new Set((input.outcomes ?? []).map((o) => String(o).trim()).filter(Boolean))].map((o) => o.slice(0, 60));
+  if (labels.length < 2 || labels.length > 8) throw new TradeError("Multiple choice markets need 2–8 different outcomes.");
+  const closes = Date.parse(String(input.closes_at ?? ""));
+  if (!Number.isFinite(closes) || closes < Date.now() + 5 * 60e3) throw new TradeError("Pick a close time at least 5 minutes from now.");
+  if (closes > Date.now() + 366 * 86400e3) throw new TradeError("Close time must be within a year.");
+  const b = Number(input.liquidity_b ?? DEFAULT_B);
+  if (!(b >= 50 && b <= 5000)) throw new TradeError("Liquidity b must be between 50 and 5000.");
+  const marketId = `m-${crypto.randomUUID()}`;
+  await tx(async (c) => {
+    await c.query(
+      `INSERT INTO markets (market_id, school_id, course, question, market_type, status, liquidity_b, creator_id,
+                            resolution_source, opens_at, closes_at)
+       VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9)`,
+      [marketId, user.school_id, course, question, type, b, user.user_id, String(input.resolution_source ?? "").trim().slice(0, 300) || null, new Date(closes)],
+    );
+    await c.query(
+      `INSERT INTO outcomes (market_id, outcome_index, label, q_shares)
+       SELECT $1, i - 1, label, 0 FROM unnest($2::text[]) WITH ORDINALITY AS x(label, i)`,
+      [marketId, labels],
+    );
+  });
+  return { marketId };
+}
 
 export async function addComment(userId: string, marketId: string, body: string) {
   const text = body.trim().slice(0, 500);
@@ -278,8 +377,12 @@ export async function addComment(userId: string, marketId: string, body: string)
   const exists = await q("SELECT 1 FROM markets WHERE market_id = $1", [marketId]);
   if (!exists.length) throw new TradeError("Market not found.", 404);
   const commentId = `c-${crypto.randomUUID()}`;
-  await q("INSERT INTO comments (comment_id, market_id, user_id, body) VALUES ($1,$2,$3,$4)", [commentId, marketId, userId, text]);
-  return { commentId };
+  const [row] = await q<{ created_at: string }>(
+    `INSERT INTO comments (comment_id, market_id, user_id, body) VALUES ($1,$2,$3,$4)
+     RETURNING to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at`,
+    [commentId, marketId, userId, text],
+  );
+  return { commentId, created_at: row.created_at };
 }
 
 /** Soft-delete your own comment. */

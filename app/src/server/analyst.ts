@@ -46,7 +46,7 @@ export async function getInsight(marketId: string): Promise<Insight | null> {
 async function buildContext(marketId: string) {
   const [market, comments, sm, insight, recent] = await Promise.all([
     getMarket(marketId),
-    getComments(marketId),
+    getComments(marketId).then((p) => p.comments),
     smartMoney(marketId).catch(() => []),
     getInsight(marketId),
     q<{ outcome_index: number; n: number; clout: number }>(

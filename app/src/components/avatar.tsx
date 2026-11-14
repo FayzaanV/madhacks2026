@@ -20,11 +20,16 @@ export function Avatar({ userId, handle, v, size = 28 }: { userId: string; handl
   );
 }
 
-/** "@handle · Title" line used next to bets, comments and holders. */
-export function PersonLine({ handle, title }: { handle: string; title?: string | null }) {
+/** "@handle · Title" line used next to bets, comments and holders. Simulated demo users get a "sim" badge. */
+export function PersonLine({ handle, title, sim }: { handle: string; title?: string | null; sim?: boolean }) {
   return (
     <span className="min-w-0 truncate">
       <span className="font-semibold">@{handle}</span>
+      {sim && (
+        <span title="Simulated demo user" className="ml-1.5 rounded bg-panel-2 px-1 py-0.5 text-[10px] font-medium uppercase text-muted">
+          sim
+        </span>
+      )}
       {title && <span className="ml-1.5 rounded bg-accent-soft px-1.5 py-0.5 text-[10px] font-medium text-accent">{title}</span>}
     </span>
   );

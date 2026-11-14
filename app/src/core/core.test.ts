@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../lib/test-vectors.json";
-import { applySell, applyTrade, cost, costToBuy, prices, sellProceeds, sharesForAmount } from "./lmsr";
+import { applySell, applyTrade, cost, costToBuy, prices, sellProceeds, sharesForAmount, sharesForProceeds } from "./lmsr";
 import { STARTING_CLOUT, canAfford, netCloutChange, privileges, sellBasis, smartMoney } from "./clout";
 import { brier, calibrationCurve, meanBrier } from "./scoring";
 
@@ -32,6 +32,12 @@ describe("shared vectors (must match databricks/lib/clout.py)", () => {
       close(sellProceeds(newQ, v.i, shares, v.b), v.amount, 1e-6);
       close(v.proceeds, v.amount, 1e-6);
     }
+    for (const v of vectors.sell_for) {
+      const k = sharesForProceeds(v.q, v.i, v.amount, v.b);
+      close(k, v.shares);
+      close(sellProceeds(v.q, v.i, k, v.b), v.amount, 1e-6);
+    }
+    expect(Number.isNaN(sharesForProceeds([0, 0], 0, 10_000, 500))).toBe(true);
     for (const v of vectors.sell_basis) close(sellBasis(v.basis, v.position, v.shares), v.removed);
   });
 
