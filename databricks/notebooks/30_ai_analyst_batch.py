@@ -88,7 +88,7 @@ prompt_sql = f"""CONCAT(
   ', now ', COALESCE(CAST(last_price_outcome0 AS STRING), 'n/a'),
   '\\nACTIVITY LAST 24H: ', trades_24h, ' trades, ', clout_24h, ' Clout',
   '\\nRECENT COMMENTS: ', comments_json,
-  '\\n\\nWrite each field in 1-2 sentences. mispricing_flag = true if crowd and smart money differ by 15+ points.'
+  '\\n\\nWrite each field in 1-2 sentences. Only call it mispriced if crowd and smart money differ by 15+ percentage points; otherwise say they roughly agree.'
 )"""
 
 insights = spark.sql(f"""
@@ -100,9 +100,13 @@ FROM (SELECT *, {prompt_sql} AS prompt FROM analyst_context)
 schema = "summary STRING, why_price_moved STRING, crowd_vs_smart_money STRING, comment_sentiment STRING, mispricing_flag BOOLEAN, confidence STRING"
 from pyspark.sql import functions as F
 
+# The mispricing flag is a rule, not an opinion: compute it from gold (gap >= 15 points), never from the LLM.
+gaps = spark.table(f"{catalog}.gold.market_mispricing").select("market_id", "gap")
 out = (insights
        .withColumn("insight", F.from_json("raw", schema))
-       .select("market_id", "course", "question", "insight.*",
+       .join(gaps, "market_id", "left")
+       .withColumn("insight", F.col("insight").withField("mispricing_flag", F.coalesce(F.col("gap") >= 0.15, F.lit(False))))
+       .select("market_id", "course", "question", "insight.*", F.round("gap", 3).alias("crowd_smart_gap"),
                F.lit(model).alias("model"), F.current_timestamp().alias("generated_at"),
                F.lit(True).alias("based_on_simulated_data")))
 out.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.gold.market_ai_insights")

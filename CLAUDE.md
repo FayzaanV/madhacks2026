@@ -9,7 +9,7 @@
 
 ## 0. Current repo state (as of 2026-11-14)
 
-The Databricks base and a first version of the website are built and deployed (branch `feat/databricks-base`):
+The Databricks base and a first version of the website are built and deployed (on `main`):
 - **Data:** simulated campus in `the_curve.bronze`, Lakeflow pipeline producing silver/gold, Lakebase ledger seeded with the same data.
 - **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: markets, betting, AI analyst, comments, leaderboard, profiles.
 - **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
