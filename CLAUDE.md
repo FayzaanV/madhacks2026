@@ -14,7 +14,8 @@ The Databricks base and a first version of the website are built and deployed (o
 - **Website:** Next.js app in `/app`, deployed as the Databricks App **`yomi`**: purple board UI, markets, betting, AI analyst, comments, leaderboard, profiles.
 - **Accounts:** passwordless university email login (pick your school, verify an email at its domain); accounts, sign-in tokens, sessions and schools live in Lakebase. REST API under `/api` (see §4 "REST API").
 - **Multi-university:** students from any university can join. Leaderboards exist for every school plus a school-vs-school league, and everyone can view every school's board.
-- **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
+- **Resolution:** `POST /api/markets/:id/resolve` (500+ Clout, or an `ADMIN_EMAILS` account) pays 1 Clout per winning share into `users.clout` (or refunds every stake if voided), opens a 24h dispute window, and starts `yomi-refresh` so gold catches up in minutes. A resolve panel shows on the market page for eligible users.
+- **Not built yet:** market proposal/upvotes, disputes (an overturn would have to reverse the payouts), Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
 - **Workspace (Free Edition):** `https://dbc-9eafb64f-74c3.cloud.databricks.com`
@@ -98,7 +99,8 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 ### Rules and safety
 - University email login only, one account per email (see "Accounts and login" in §4). Note: the app is hosted on Databricks Apps, which puts a Databricks sign-in in front of it, so only workspace members can reach it until it's hosted publicly.
 - No markets about individual students.
-- Instructors/TAs cannot trade on their own course's markets.
+- Instructors/TAs cannot trade on their own course's markets: list them in the Lakebase `course_staff (user_id, course, role)` table; `placeTrade` rejects their trades with a 403. (`users.is_instructor` is legacy and unused.)
+- Rate limits: 20 trades per user per minute, 10 AI analyst questions per user per hour (every question is a Foundation Model call on our Free Edition quota).
 - All demo data is **simulated** and must be **labeled as such** in the UI.
 
 ---
@@ -118,7 +120,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | **Asset Bundles** | All jobs, the pipeline and the app are code. `databricks bundle deploy -t dev` (your own copy, prefixed with your name) or `-t prod` (shared, deploy from `main` only). | `databricks.yml`, `resources/*.yml` |
 | **Unity Catalog** | Catalog `the_curve` (bronze/silver/gold/ml/ai) + `the_curve_ledger` (the Lakebase DB, readable from Spark/SQL). | `databricks/sql/00_setup_catalog.sql` |
 | **Lakebase** (Postgres) | Live trade ledger. Project `the-curve-ledger`, branch `production`, DB `databricks_postgres`. Auth = short-lived OAuth credential, no passwords. | `db/schema.sql`, `app/src/server/ledger.ts` |
-| **Lakeflow Jobs** (serverless) | `simulate_and_build` (sim → seed Lakebase → pipeline) and `refresh` (every 15 min: Lakebase → bronze → pipeline → AI analyst). | `resources/data.yml` |
+| **Lakeflow Jobs** (serverless) | `simulate_and_build` (sim → seed Lakebase → pipeline) and `refresh` (every 15 min **and** after each resolution, runs queued: Lakebase → bronze → pipeline → AI analyst). The sync MERGEs only new rows of append-only `trades` / `ai_questions` (1h overlap); small mutable tables are snapshotted; widget `full_refresh=true` rewrites everything. | `resources/data.yml` |
 | **Lakeflow Declarative Pipelines** | `the-curve-medallion`: silver + gold materialized views. | `databricks/pipelines/*.sql` |
 | **SQL warehouse** | App reads gold via the Statement Execution API. | `app/src/server/warehouse.ts` |
 | **Foundation Model APIs + `ai_query`** | AI market analyst (batch in SQL, live chat from the app). | `30_ai_analyst_batch.py`, `app/src/server/analyst.ts` |
@@ -160,13 +162,15 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | POST | `/api/markets/:id/trade` | ✓ | `{outcome, amount}` → spends Clout |
 | GET / POST | `/api/markets/:id/comments` | – / ✓ | list / add |
 | DELETE | `/api/comments/:id` | ✓ | delete your own comment |
-| POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text) |
+| POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text), 10/hour |
+| POST | `/api/markets/:id/resolve` | ✓ 500+ | `{outcome \| "void", rationale}` → pays out, starts refresh |
 Errors are `{ "error": "…" }` with 400/401/403/404/429. Route handlers are thin wrappers over `app/src/server/*`.
 
 ### Running things
 ```
 python3 scripts/dbsql.py "SELECT * FROM the_curve.gold.leaderboard LIMIT 5"   # SQL on the warehouse
 node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"                # SQL on Lakebase
+node app/scripts/ledger-sql.mjs "$(cat db/schema.sql)"                      # apply schema changes (idempotent, keeps data)
 databricks bundle run -t dev simulate_and_build                              # rebuild sim data (TRUNCATES the ledger)
 databricks bundle run -t dev refresh                                         # sync + pipeline + AI insights
 databricks bundle run -t dev yomi                                             # deploy the app
@@ -214,7 +218,7 @@ Catalog: **`the_curve`**
 |---|---|
 | `bronze` | `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
 | `silver` | `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_brier`, `user_course_clout`, `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
+| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 
@@ -228,6 +232,10 @@ DATABRICKS_CATALOG=the_curve
 DATABASE_URL=                   # Lakebase or Supabase Postgres
 AUTH_SECRET=
 ```
+Optional: `ADMIN_EMAILS` (comma-separated) lets those accounts resolve markets without 500 Clout, for demos. Set it in `app/.env.local` or as an app env var, **never in the repo** (it's public). `REFRESH_JOB_ID` comes from the app's `refresh-job` resource; locally the job is found by name.
+
+Gold reads (`querySql`) are cached for 30 s per query and cleared on resolution.
+
 Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Sign in at `http://localhost:3000/login` with any university email; without `RESEND_API_KEY` the sign-in link is shown on screen (demo mode). On Databricks Apps, credentials come from the app's service principal and its resources.
 
 ---
@@ -284,7 +292,7 @@ For outcomes `i` with outstanding shares `q_i` and liquidity `b`:
 - Voided market: stakes refunded, creator penalized.
 
 ### Brier score and calibration
-- Per forecast: `(f − o)²`, `f` = forecast probability, `o ∈ {0,1}`. User Brier = mean over resolved forecasts (lower is better).
+- Per forecast: `(f − o)²`, `f` = forecast probability, `o ∈ {0,1}`. User Brier: per resolved market, the stake-weighted mean of its trades' `(f − o)²`; then the plain mean over markets, so every market counts once (lower is better). `n_forecasts` = markets. Calibration is still per trade.
 - A trade's forecast `f` = **post-trade price** of the outcome the user bought.
 - Calibration curve: bucket forecasts into 10% bins; per bin, compare mean `f` to hit rate.
 

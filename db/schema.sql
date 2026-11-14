@@ -159,3 +159,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_handle_real_uidx ON users (lower(handle)
 ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS ip_hash text;
 CREATE INDEX IF NOT EXISTS login_tokens_ip_idx ON login_tokens (ip_hash, created_at);
 CREATE INDEX IF NOT EXISTS login_tokens_created_idx ON login_tokens (created_at);
+
+-- ------------------------------------------------------------------ course staff (no trading on your own course)
+-- Instructors and TAs per course. placeTrade rejects trades on markets whose course you staff.
+CREATE TABLE IF NOT EXISTS course_staff (
+  user_id    text NOT NULL REFERENCES users(user_id),
+  course     text NOT NULL,
+  role       text NOT NULL DEFAULT 'instructor' CHECK (role IN ('instructor', 'ta')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (user_id, course)
+);
+
+-- ------------------------------------------------------------------ trade + AI rate limits
+CREATE INDEX IF NOT EXISTS trades_user_time_idx ON trades (user_id, created_at);
+CREATE INDEX IF NOT EXISTS ai_questions_user_time_idx ON ai_questions (user_id, created_at);

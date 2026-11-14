@@ -41,6 +41,9 @@ resources:
     refresh:
       name: yomi-refresh
       description: Lakebase ledger -> bronze, refresh silver/gold, then regenerate AI analyst insights.
+      # The app also starts this job right after each resolution; queue those runs instead of skipping them.
+      queue:
+        enabled: true
       schedule:
         quartz_cron_expression: "0 0/15 * * * ?"
         timezone_id: America/Chicago

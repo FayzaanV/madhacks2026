@@ -8,7 +8,8 @@ import { PriceChart } from "@/components/price-chart";
 import { OutcomeRows, PickProvider } from "@/components/trade-context";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { getInsight } from "@/server/analyst";
-import { getComments, getMarket, priceHistory, smartMoney, userStake } from "@/server/markets";
+import { canResolve, getComments, getMarket, priceHistory, smartMoney, userStake } from "@/server/markets";
+import { ResolveBox } from "@/components/resolve-box";
 import { DeleteCommentButton } from "@/components/comment-box";
 import Link from "next/link";
 import { currentUser } from "@/server/user";
@@ -83,6 +84,9 @@ async function Market({
             qShares={market.outcomes.map((o) => o.q_shares)}
             available={user ? Math.max(0, user.clout) : null}
           />
+          {user && canResolve(user) && ["live", "closed"].includes(market.status) && (
+            <ResolveBox marketId={id} outcomes={outcomes} />
+          )}
           {user ? (
             <div className="rounded-2xl border border-line bg-panel p-4 text-sm">
               <div className="flex justify-between"><span className="text-muted">Your Clout</span><Clout value={user.clout + user.open_stake} /></div>
@@ -112,7 +116,7 @@ async function Chart({ id, labels }: { id: string; labels: string[] }) {
         <span className="flex items-center gap-1.5">
           <i className="inline-block h-2 w-2 rounded-full bg-smart" /> Smart Money <b className="tabular text-smart">{pct(sm[0]?.smart_price)}</b>
         </span>
-        <span className="ml-auto text-xs text-muted">from gold tables · refreshes every 15 min</span>
+        <span className="ml-auto text-xs text-muted">from gold tables · refreshes every 15 min and after each resolution</span>
       </div>
       <PriceChart points={series.map((p) => ({ t: Date.parse(p.created_at), crowd: p.crowd_price, smart: p.smart_price }))} height={260} />
     </section>

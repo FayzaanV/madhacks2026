@@ -7,6 +7,8 @@ env:
     valueFrom: ai-model
   - name: DATABRICKS_CATALOG
     value: the_curve
+  - name: REFRESH_JOB_ID          # started after each resolution so gold catches up (app/src/server/jobs.ts)
+    valueFrom: refresh-job
   - name: LAKEBASE_ENDPOINT
     value: projects/the-curve-ledger/branches/production/endpoints/primary
   # Demo mode: sign-in links are shown on screen (no email). Acceptable ONLY because Databricks Apps already

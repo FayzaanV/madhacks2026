@@ -1,8 +1,10 @@
 import "server-only";
 import { config, databricksHost, databricksToken } from "./databricks";
-import { getComments, getMarket, smartMoney } from "./markets";
+import { getComments, getMarket, smartMoney, TradeError } from "./markets";
 import { q } from "./ledger";
 import { querySql } from "./warehouse";
+
+const MAX_QUESTIONS_PER_HOUR = 10;
 
 export const SYSTEM_PROMPT = `You are Yomi's AI market analyst for a college prediction market (students from many universities; these markets are about UW-Madison).
 Students bet reputation points called Clout, never money.
@@ -88,6 +90,14 @@ async function buildContext(marketId: string) {
  * Q&A to Lakebase (ai_questions), which the refresh job syncs into bronze for analysis.
  */
 export async function askAnalyst(marketId: string, userId: string, question: string): Promise<ReadableStream<Uint8Array>> {
+  // Every question is a Foundation Model call on our Free Edition quota; one user can't burn it for everyone.
+  const used = (
+    await q<{ n: number }>("SELECT count(*)::int AS n FROM ai_questions WHERE user_id = $1 AND created_at > now() - interval '1 hour'", [
+      userId,
+    ])
+  )[0].n;
+  if (used >= MAX_QUESTIONS_PER_HOUR)
+    throw new TradeError(`You've asked ${MAX_QUESTIONS_PER_HOUR} questions this hour. Try again later.`, 429);
   const ctx = await buildContext(marketId);
   if (!ctx) throw new Error("Market not found");
   const started = Date.now();

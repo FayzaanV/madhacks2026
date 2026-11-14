@@ -2,23 +2,33 @@
 -- Formulas mirror databricks/lib/clout.py (payout, Brier, calibration, Smart Money).
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_clout
-COMMENT 'Clout = 100 + realized profit (resolved winning shares - resolved spend). available = Clout - open stakes.'
+COMMENT 'Clout = 100 + realized profit (resolved winning shares - resolved spend). available = Clout - open stakes. Voided markets are refunded, so they count as neither.'
 AS SELECT u.user_id, u.handle, u.school_id, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
           100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS clout,
           COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS realized_profit,
-          COALESCE(SUM(CASE WHEN NOT t.is_resolved THEN t.clout_spent END), 0) AS open_stake,
+          COALESCE(SUM(CASE WHEN NOT t.is_resolved AND t.market_status <> 'voided' THEN t.clout_spent END), 0) AS open_stake,
           100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0)
-              - COALESCE(SUM(CASE WHEN NOT t.is_resolved THEN t.clout_spent END), 0) AS available,
+              - COALESCE(SUM(CASE WHEN NOT t.is_resolved AND t.market_status <> 'voided' THEN t.clout_spent END), 0) AS available,
           COUNT(t.trade_id) AS n_trades,
           COUNT(DISTINCT t.market_id) AS n_markets
 FROM the_curve.silver.users u
 LEFT JOIN the_curve.silver.trades_enriched t USING (user_id)
 GROUP BY ALL;
 
-CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_brier
-COMMENT 'Mean Brier score (f - o)^2 over resolved forecasts; lower is better'
-AS SELECT user_id, AVG(POW(forecast - won, 2)) AS brier, COUNT(*) AS n_forecasts
+-- Brier is scored per (user, market), not per trade: inside a market each trade's (f - o)^2 is weighted by its stake,
+-- then every market counts once. Otherwise ten 1-Clout bets outweigh one 100-Clout bet and flair can be farmed.
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_market_brier
+COMMENT 'Stake-weighted Brier per user and resolved market'
+AS SELECT user_id, market_id, course,
+          SUM(clout_spent * POW(forecast - won, 2)) / SUM(clout_spent) AS brier,
+          SUM(won * shares - clout_spent) AS clout
 FROM the_curve.silver.trades_enriched WHERE is_resolved
+GROUP BY user_id, market_id, course;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_brier
+COMMENT 'Mean Brier score over resolved markets (each market once, stake-weighted inside); lower is better. n_forecasts = markets'
+AS SELECT user_id, AVG(brier) AS brier, COUNT(*) AS n_forecasts
+FROM the_curve.gold.user_market_brier
 GROUP BY user_id;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_calibration
@@ -33,10 +43,9 @@ UNION ALL
 SELECT '__all__', CAST(bucket AS INT), COUNT(*), AVG(forecast), AVG(won) FROM f GROUP BY bucket;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_course_clout
-COMMENT 'Clout earned per course (resolved markets only)'
-AS SELECT user_id, course, SUM(won * shares - clout_spent) AS clout, AVG(POW(forecast - won, 2)) AS brier,
-          COUNT(*) AS n_forecasts
-FROM the_curve.silver.trades_enriched WHERE is_resolved
+COMMENT 'Clout earned per course (resolved markets only). brier/n_forecasts are per market, like user_brier'
+AS SELECT user_id, course, SUM(clout) AS clout, AVG(brier) AS brier, COUNT(*) AS n_forecasts
+FROM the_curve.gold.user_market_brier
 GROUP BY user_id, course;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.leaderboard
@@ -129,3 +138,10 @@ AS WITH per AS (
 SELECT p.*, s.name, s.short_name, s.domain, s.color,
        RANK() OVER (ORDER BY p.avg_clout DESC) AS rank
 FROM per p LEFT JOIN the_curve.silver.schools s USING (school_id);
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.clout_drift
+COMMENT 'Ledger balance (users.clout in Lakebase) vs the balance gold recomputes from trades. Should be empty; rows mean a payout bug'
+AS SELECT u.user_id, u.handle, u.is_simulated, u.ledger_clout, c.available AS gold_available,
+          u.ledger_clout - c.available AS drift
+FROM the_curve.silver.users u JOIN the_curve.gold.user_clout c USING (user_id)
+WHERE ABS(u.ledger_clout - c.available) > 0.01;

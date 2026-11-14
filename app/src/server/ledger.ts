@@ -21,8 +21,18 @@ async function lakebaseCredential(): Promise<{ token: string; expires: number }>
   return { token: r.token, expires: Date.parse(r.expire_time) };
 }
 
-async function getPool(): Promise<Pool> {
-  if (pool && poolExpires > Date.now() + 120_000) return pool;
+let pending: Promise<Pool> | null = null;
+
+/** Concurrent callers share one in-flight build, so a cold start creates one pool instead of one per request. */
+function getPool(): Promise<Pool> {
+  if (pool && poolExpires > Date.now() + 120_000) return Promise.resolve(pool);
+  pending ??= buildPool().finally(() => {
+    pending = null;
+  });
+  return pending;
+}
+
+async function buildPool(): Promise<Pool> {
   const old = pool;
   const [ep, me, cred] = await Promise.all([
     dbx<Endpoint>(`/api/2.0/postgres/${config.lakebaseEndpoint}`),

@@ -1,8 +1,11 @@
 import "server-only";
 import { applyTrade, prices } from "@/core/lmsr";
-import { canAfford } from "@/core/clout";
+import { canAfford, netCloutChange, privileges } from "@/core/clout";
+import { triggerRefresh } from "./jobs";
 import { q, tx } from "./ledger";
-import { querySql } from "./warehouse";
+import { clearWarehouseCache, querySql } from "./warehouse";
+
+const MAX_TRADES_PER_MINUTE = 20;
 
 export type Outcome = { outcome_index: number; label: string; q_shares: number; price: number };
 export type Market = {
@@ -99,10 +102,17 @@ export async function placeTrade(userId: string, marketId: string, outcomeIndex:
   if (!(amount > 0) || !Number.isFinite(amount)) throw new TradeError("Bet must be a positive amount of Clout.");
   amount = Math.round(amount * 100) / 100;
   return tx(async (c) => {
-    const m = (await c.query("SELECT status, liquidity_b FROM markets WHERE market_id = $1", [marketId])).rows[0];
+    const m = (await c.query("SELECT status, liquidity_b, course FROM markets WHERE market_id = $1", [marketId])).rows[0];
     if (!m) throw new TradeError("Market not found.", 404);
     if (m.status !== "live") throw new TradeError("This market is not open for trading.");
     const u = (await c.query("SELECT clout FROM users WHERE user_id = $1 FOR UPDATE", [userId])).rows[0];
+    // Checked after the user row lock so parallel requests from one user can't slip past the limit.
+    const recent = (
+      await c.query("SELECT count(*)::int AS n FROM trades WHERE user_id = $1 AND created_at > now() - interval '1 minute'", [userId])
+    ).rows[0].n as number;
+    if (recent >= MAX_TRADES_PER_MINUTE) throw new TradeError("You're trading too fast. Wait a minute and try again.", 429);
+    const staff = await c.query("SELECT 1 FROM course_staff WHERE user_id = $1 AND course = $2", [userId, m.course]);
+    if (staff.rowCount) throw new TradeError(`Instructors and TAs can't trade on ${m.course} markets.`, 403);
     if (!canAfford(u.clout, amount))
       throw new TradeError(`You only have ${Math.max(0, u.clout).toFixed(1)} Clout available.`);
     const os = (
@@ -131,6 +141,75 @@ export async function placeTrade(userId: string, marketId: string, outcomeIndex:
     return { tradeId, shares, priceBefore: before, priceAfter: postPrice, balance };
   });
 }
+
+/**
+ * Resolve a market (or void it). One Postgres transaction that:
+ *   - requires the resolve privilege (500+ true Clout = balance + open stake), or an ADMIN_EMAILS account
+ *   - locks the market, records the resolution with a 24h dispute deadline, sets status resolved/voided
+ *   - pays out: each winning share credits 1 Clout (stakes were already spent when the bets were placed);
+ *     a voided market refunds every stake
+ * Then kicks off the refresh job so gold (leaderboards, Brier, calibration) catches up within minutes.
+ * Disputes are not built yet: a later overturn would need to reverse these credits.
+ */
+export async function resolveMarket(
+  user: { user_id: string; email: string; clout: number; open_stake: number },
+  marketId: string,
+  winner: number | "void",
+  rationale: string,
+) {
+  if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
+  const note = rationale.trim().slice(0, 1000);
+  const out = await tx(async (c) => {
+    const m = (await c.query("SELECT status FROM markets WHERE market_id = $1 FOR UPDATE", [marketId])).rows[0];
+    if (!m) throw new TradeError("Market not found.", 404);
+    if (!["live", "closed"].includes(m.status)) throw new TradeError(`This market is already ${m.status}.`, 409);
+    const n = (await c.query("SELECT count(*)::int AS n FROM outcomes WHERE market_id = $1", [marketId])).rows[0].n as number;
+    if (winner !== "void" && !(Number.isInteger(winner) && winner >= 0 && winner < n)) throw new TradeError("Unknown outcome.");
+
+    const rows = (
+      await c.query("SELECT user_id, outcome_index, clout_spent, shares FROM trades WHERE market_id = $1", [marketId])
+    ).rows as { user_id: string; outcome_index: number; clout_spent: number; shares: number }[];
+    const byUser = new Map<string, [number, number, number][]>();
+    for (const r of rows) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), [r.outcome_index, r.clout_spent, r.shares]]);
+    // Credit back to the balance = payout (winning shares), or the stake itself if voided.
+    const ids: string[] = [];
+    const credits: number[] = [];
+    for (const [id, trades] of byUser) {
+      const spent = trades.reduce((a, [, s]) => a + s, 0);
+      const credit = winner === "void" ? spent : netCloutChange(trades, winner) + spent;
+      if (credit > 0) {
+        ids.push(id);
+        credits.push(credit);
+      }
+    }
+    await c.query(
+      `UPDATE users u SET clout = u.clout + x.credit
+       FROM unnest($1::text[], $2::float8[]) AS x(user_id, credit) WHERE u.user_id = x.user_id`,
+      [ids, credits],
+    );
+    const status = winner === "void" ? "voided" : "resolved";
+    await c.query("UPDATE markets SET status = $2 WHERE market_id = $1", [marketId, status]);
+    await c.query(
+      `INSERT INTO resolutions (market_id, winning_outcome_index, resolved_by, rationale, resolved_at, dispute_deadline, status)
+       VALUES ($1, $2, $3, $4, now(), now() + interval '24 hours', $5)
+       ON CONFLICT (market_id) DO UPDATE SET winning_outcome_index = EXCLUDED.winning_outcome_index,
+         resolved_by = EXCLUDED.resolved_by, rationale = EXCLUDED.rationale, resolved_at = now(),
+         dispute_deadline = EXCLUDED.dispute_deadline, final_at = NULL, status = EXCLUDED.status`,
+      [marketId, winner === "void" ? null : winner, user.user_id, note || null, status],
+    );
+    return { status, traders: byUser.size, paidOut: credits.reduce((a, x) => a + x, 0) };
+  });
+  clearWarehouseCache();
+  const refreshRunId = await triggerRefresh();
+  return { ...out, refreshRunId };
+}
+
+const adminEmails = () =>
+  (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean);
+
+/** 500+ true Clout (balance + open stake), or an admin email for demos where nobody has 500 yet. */
+export const canResolve = (u: { email: string; clout: number; open_stake: number }) =>
+  privileges(u.clout + u.open_stake).includes("resolve") || adminEmails().includes(u.email.toLowerCase());
 
 export async function addComment(userId: string, marketId: string, body: string) {
   const text = body.trim().slice(0, 500);
