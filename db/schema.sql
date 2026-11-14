@@ -173,3 +173,29 @@ CREATE TABLE IF NOT EXISTS course_staff (
 -- ------------------------------------------------------------------ trade + AI rate limits
 CREATE INDEX IF NOT EXISTS trades_user_time_idx ON trades (user_id, created_at);
 CREATE INDEX IF NOT EXISTS ai_questions_user_time_idx ON ai_questions (user_id, created_at);
+
+-- ------------------------------------------------------------------ selling (signed trades + average-cost basis)
+-- buy:  shares +n, clout_spent +amount (cash out),   basis_change +amount
+-- sell: shares -k, clout_spent -proceeds (cash in),  basis_change -(avg cost * k)
+-- position = sum(shares); open cost basis = sum(basis_change); realized on a sell = proceeds - avg cost * k.
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS side text NOT NULL DEFAULT 'buy';
+ALTER TABLE trades ADD COLUMN IF NOT EXISTS basis_change double precision;
+UPDATE trades SET basis_change = clout_spent WHERE basis_change IS NULL;
+ALTER TABLE trades ALTER COLUMN basis_change SET NOT NULL;
+ALTER TABLE trades DROP CONSTRAINT IF EXISTS trades_clout_spent_check;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_side_check') THEN
+    ALTER TABLE trades ADD CONSTRAINT trades_side_check CHECK (side IN ('buy', 'sell'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'trades_clout_nonzero') THEN
+    ALTER TABLE trades ADD CONSTRAINT trades_clout_nonzero CHECK (clout_spent <> 0);
+  END IF;
+END $$;
+CREATE INDEX IF NOT EXISTS trades_market_user_idx ON trades (market_id, user_id, outcome_index);
+
+-- ------------------------------------------------------------------ profile: avatar + chosen title
+-- Avatar: a 128px image resized in the browser (<= 64 KB), served by /api/users/:id/avatar. Never synced to bronze.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar bytea;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_type text;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS title text;  -- chosen from earned titles (app/src/core/titles.ts)

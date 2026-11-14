@@ -3,7 +3,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { STARTING_CLOUT } from "@/core/clout";
 import { schoolForEmail } from "@/core/universities";
-import { q, tx } from "./ledger";
+import { openStakeSql, q, tx } from "./ledger";
 
 /**
  * Passwordless university email login: pick your school, prove you own an email at its domain.
@@ -40,6 +40,8 @@ export type User = {
   clout: number; // available balance
   open_stake: number;
   is_simulated: boolean;
+  title: string | null; // chosen title (validated against earned titles on display)
+  avatar_v: number | null; // avatar version (epoch seconds) or null if none uploaded
 };
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -205,8 +207,7 @@ export async function currentUser(): Promise<User | null> {
   if (!sid) return null;
   const rows = await q<User>(
     `SELECT u.user_id, u.handle, u.email, u.school_id, u.handle_chosen_at IS NOT NULL AS handle_chosen, u.clout, u.is_simulated,
-            coalesce((SELECT sum(t.clout_spent) FROM trades t JOIN markets m USING (market_id)
-                      WHERE t.user_id = u.user_id AND m.status NOT IN ('resolved', 'final', 'voided')), 0)::float AS open_stake
+            u.title, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, ${openStakeSql("u.user_id")} AS open_stake
      FROM sessions s JOIN users u USING (user_id)
      WHERE s.session_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
     [sha256(sid)],
@@ -233,7 +234,8 @@ export async function deleteAccount(userId: string): Promise<void> {
     await c.query("UPDATE comments SET deleted_at = now() WHERE user_id = $1 AND deleted_at IS NULL", [userId]);
     await c.query(
       `UPDATE users SET email = 'deleted-' || user_id || '@deleted.invalid', handle = 'deleted_user',
-                        major = NULL, dorm = NULL, club = NULL, deleted_at = now()
+                        major = NULL, dorm = NULL, club = NULL, title = NULL,
+                        avatar = NULL, avatar_type = NULL, avatar_updated_at = NULL, deleted_at = now()
        WHERE user_id = $1`,
       [userId],
     );

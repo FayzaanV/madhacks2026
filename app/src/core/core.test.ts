@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../lib/test-vectors.json";
-import { applyTrade, cost, costToBuy, prices, sharesForAmount } from "./lmsr";
-import { STARTING_CLOUT, canAfford, netCloutChange, privileges, smartMoney } from "./clout";
+import { applySell, applyTrade, cost, costToBuy, prices, sellProceeds, sharesForAmount } from "./lmsr";
+import { STARTING_CLOUT, canAfford, netCloutChange, privileges, sellBasis, smartMoney } from "./clout";
 import { brier, calibrationCurve, meanBrier } from "./scoring";
 
 const TOL = vectors.tolerance;
@@ -18,6 +18,21 @@ describe("shared vectors (must match databricks/lib/clout.py)", () => {
       close(costToBuy(v.q, v.i, shares, v.b), v.amount, 1e-6);
       close(applyTrade(v.q, v.i, v.amount, v.b).postPrice, v.post_price);
     }
+  });
+
+  it("LMSR selling", () => {
+    for (const v of vectors.sell) {
+      const r = applySell(v.q, v.i, v.shares, v.b);
+      close(r.proceeds, v.proceeds);
+      close(r.postPrice, v.post_price);
+      r.newQ.forEach((x, j) => close(x, v.new_q[j]));
+    }
+    for (const v of vectors.round_trip) {
+      const { newQ, shares } = applyTrade(v.q, v.i, v.amount, v.b);
+      close(sellProceeds(newQ, v.i, shares, v.b), v.amount, 1e-6);
+      close(v.proceeds, v.amount, 1e-6);
+    }
+    for (const v of vectors.sell_basis) close(sellBasis(v.basis, v.position, v.shares), v.removed);
   });
 
   it("Clout rules", () => {

@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { handle, readJson } from "@/server/api";
 import { SESSION_COOKIE, deleteAccount, requireUser, setHandle } from "@/server/auth";
+import { setTitle } from "@/server/profile";
 import { querySql } from "@/server/warehouse";
 
 /** GET /api/me -> your balance from Lakebase plus Brier/rank from the gold tables. */
@@ -27,12 +28,18 @@ export async function GET() {
   });
 }
 
-/** PATCH /api/me { handle } -> pick or change your username (409 if taken). */
+/**
+ * PATCH /api/me { handle?, title? } -> change your username (409 if taken) and/or the title shown next to it
+ * (must be earned; null resets to your tier title).
+ */
 export async function PATCH(req: Request) {
   return handle(async () => {
     const u = await requireUser();
-    const body = await readJson<{ handle: string }>(req);
-    return Response.json({ handle: await setHandle(u.user_id, body.handle) });
+    const body = await readJson<{ handle: string; title: string | null }>(req);
+    const out: { handle?: string; title?: string | null } = {};
+    if (body.handle !== undefined) out.handle = await setHandle(u.user_id, body.handle);
+    if (body.title !== undefined) out.title = await setTitle(u, body.title);
+    return Response.json(out);
   });
 }
 

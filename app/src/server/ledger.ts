@@ -10,6 +10,14 @@ import { config, dbx } from "./databricks";
 type Endpoint = { status: { hosts: { host: string } } };
 type Me = { userName: string; id: string };
 
+/**
+ * Open stake = cost basis still at risk in unresolved markets. Uses basis_change (not clout_spent) so a sell
+ * removes its average cost and profit already taken sits in the balance. Pass the SQL for the user id column.
+ */
+export const openStakeSql = (userIdCol: string) =>
+  `coalesce((SELECT sum(t.basis_change) FROM trades t JOIN markets m USING (market_id)
+             WHERE t.user_id = ${userIdCol} AND m.status NOT IN ('resolved', 'final', 'voided')), 0)::float`;
+
 let pool: Pool | null = null;
 let poolExpires = 0;
 

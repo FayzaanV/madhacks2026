@@ -1,13 +1,22 @@
 import { handle, readJson } from "@/server/api";
 import { requireUser } from "@/server/auth";
-import { placeTrade } from "@/server/markets";
+import { placeBuy, placeSell } from "@/server/markets";
 
-/** POST /api/markets/:id/trade { outcome, amount } -> spends Clout, moves the LMSR price. Sign-in required. */
+/**
+ * POST /api/markets/:id/trade. Sign-in required.
+ *   buy:  { outcome, amount }                  -> spends `amount` Clout, moves the LMSR price up
+ *   sell: { side: "sell", outcome, shares }    -> sells shares back at the LMSR price, proceeds to your balance
+ */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   return handle(async () => {
     const { id } = await params;
     const user = await requireUser();
-    const { outcome, amount } = await readJson<{ outcome: number; amount: number }>(req);
-    return Response.json(await placeTrade(user.user_id, id, Number(outcome), Number(amount)));
+    const body = await readJson<{ side: "buy" | "sell"; outcome: number; amount: number; shares: number }>(req);
+    const outcome = Number(body.outcome);
+    return Response.json(
+      body.side === "sell"
+        ? await placeSell(user.user_id, id, outcome, Number(body.shares))
+        : await placeBuy(user.user_id, id, outcome, Number(body.amount)),
+    );
   });
 }

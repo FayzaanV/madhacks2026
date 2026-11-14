@@ -33,6 +33,10 @@ export function smartMoney(
   return total > 0 ? w.map((x) => x / total) : null;
 }
 
+/** Average-cost basis removed when selling `shares` of a position that cost `basis` in total. */
+export const sellBasis = (basis: number, position: number, shares: number) =>
+  position <= 0 || shares <= 0 ? 0 : (basis * Math.min(shares, position)) / position;
+
 /** trades: [outcomeIndex, cloutSpent, shares]. Net = winning shares - total spent. */
 export function netCloutChange(trades: readonly (readonly [number, number, number])[], winner: number): number {
   let won = 0;

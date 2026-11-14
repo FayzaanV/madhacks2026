@@ -210,7 +210,7 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
         clout_now[user_id] -= amount
         tid += 1
         row = {"trade_id": f"t-sim-{tid:06d}", "market_id": mid, "user_id": user_id, "outcome_index": outcome,
-               "clout_spent": round(amount, 4), "shares": sh,
+               "side": "buy", "clout_spent": round(amount, 4), "shares": sh, "basis_change": round(amount, 4),
                "price_before": c.prices(q, m_by_id[mid]["liquidity_b"])[outcome],
                "prices_after": c.prices(new_q, m_by_id[mid]["liquidity_b"]),
                "user_clout_at_trade": balance_before, "created_at": t}

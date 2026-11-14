@@ -67,6 +67,21 @@ def apply_trade(q: Sequence[float], i: int, amount: float, b: float = DEFAULT_B)
     return q2, shares, prices(q2, b)[i]
 
 
+def sell_proceeds(q: Sequence[float], i: int, shares: float, b: float = DEFAULT_B) -> float:
+    """Clout received for selling `shares` of outcome i back to the market maker: C(q) - C(q - shares*e_i)."""
+    if shares <= 0:
+        return 0.0
+    return -cost_to_buy(q, i, -shares, b)
+
+
+def apply_sell(q: Sequence[float], i: int, shares: float, b: float = DEFAULT_B):
+    """Return (new_q, proceeds, post_trade_price_of_i)."""
+    proceeds = sell_proceeds(q, i, shares, b)
+    q2 = list(q)
+    q2[i] -= shares
+    return q2, proceeds, prices(q2, b)[i]
+
+
 def max_market_maker_loss(n_outcomes: int, b: float = DEFAULT_B) -> float:
     return b * math.log(n_outcomes)
 
@@ -89,6 +104,13 @@ def privileges(clout: float) -> list[str]:
 def payout(shares_by_outcome: dict[int, float], winning_outcome: int) -> float:
     """Each winning share pays 1 Clout; losing shares pay 0."""
     return float(shares_by_outcome.get(winning_outcome, 0.0))
+
+
+def sell_basis(basis: float, position: float, shares: float) -> float:
+    """Average-cost basis removed when selling `shares` of a position that cost `basis` in total."""
+    if position <= 0 or shares <= 0:
+        return 0.0
+    return basis * min(shares, position) / position
 
 
 def net_clout_change(trades: Iterable[tuple[int, float, float]], winning_outcome: int) -> float:

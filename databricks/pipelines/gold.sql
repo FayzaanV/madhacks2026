@@ -1,26 +1,53 @@
 -- Lakeflow Declarative Pipeline: silver -> gold. The app reads these through the SQL warehouse.
 -- Formulas mirror databricks/lib/clout.py (payout, Brier, calibration, Smart Money).
 
+-- Trades are signed (sells: negative shares, clout_spent = -proceeds, basis_change = -avg cost removed).
+--   resolved market:  realized = won * shares - clout_spent   (payout on shares still held minus net cash put in)
+--   open market:      realized = basis_change - clout_spent    (profit already taken by selling), at risk = basis_change
+--   voided market:    nothing (every net cash flow was reversed)
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_clout
-COMMENT 'Clout = 100 + realized profit (resolved winning shares - resolved spend). available = Clout - open stakes. Voided markets are refunded, so they count as neither.'
-AS SELECT u.user_id, u.handle, u.school_id, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
-          100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS clout,
-          COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS realized_profit,
-          COALESCE(SUM(CASE WHEN NOT t.is_resolved AND t.market_status <> 'voided' THEN t.clout_spent END), 0) AS open_stake,
-          100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0)
-              - COALESCE(SUM(CASE WHEN NOT t.is_resolved AND t.market_status <> 'voided' THEN t.clout_spent END), 0) AS available,
-          COUNT(t.trade_id) AS n_trades,
-          COUNT(DISTINCT t.market_id) AS n_markets
-FROM the_curve.silver.users u
-LEFT JOIN the_curve.silver.trades_enriched t USING (user_id)
-GROUP BY ALL;
+COMMENT 'Clout = 100 + realized profit (resolved payouts + profit taken by selling). open_stake = cost basis still held in open markets. available = Clout - open_stake = the ledger balance.'
+AS WITH t AS (
+  SELECT user_id, trade_id, market_id,
+         CASE WHEN is_resolved THEN won * shares - clout_spent
+              WHEN market_status <> 'voided' THEN basis_change - clout_spent ELSE 0 END AS realized,
+         CASE WHEN NOT is_resolved AND market_status <> 'voided' THEN basis_change ELSE 0 END AS at_risk
+  FROM the_curve.silver.trades_enriched
+), agg AS (
+  SELECT u.user_id, u.handle, u.school_id, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
+         COALESCE(SUM(t.realized), 0) AS realized_profit,
+         COALESCE(SUM(t.at_risk), 0) AS open_stake,
+         COUNT(t.trade_id) AS n_trades,
+         COUNT(DISTINCT t.market_id) AS n_markets
+  FROM the_curve.silver.users u
+  LEFT JOIN t USING (user_id)
+  GROUP BY ALL
+)
+SELECT user_id, handle, school_id, major, dorm, club, archetype, is_simulated,
+       100 + realized_profit AS clout, realized_profit, open_stake, 100 + realized_profit - open_stake AS available,
+       n_trades, n_markets
+FROM agg;
 
--- Brier is scored per (user, market), not per trade: inside a market each trade's (f - o)^2 is weighted by its stake,
--- then every market counts once. Otherwise ten 1-Clout bets outweigh one 100-Clout bet and flair can be farmed.
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_clout_history
+COMMENT 'True Clout over time per user (portfolio chart): steps at each sell (profit taken) and each resolution (payout - basis held)'
+AS WITH ev AS (
+  SELECT user_id, created_at AS at, basis_change - clout_spent AS delta
+  FROM the_curve.silver.trades_enriched WHERE side = 'sell' AND market_status <> 'voided'
+  UNION ALL
+  SELECT user_id, resolved_at AS at, SUM(won * shares - basis_change) AS delta
+  FROM the_curve.silver.trades_enriched WHERE is_resolved
+  GROUP BY user_id, market_id, resolved_at
+)
+SELECT user_id, at, delta, 100 + SUM(delta) OVER (PARTITION BY user_id ORDER BY at ROWS UNBOUNDED PRECEDING) AS clout
+FROM ev;
+
+-- Brier is scored per (user, market), not per trade: inside a market each buy's (f - o)^2 is weighted by its stake,
+-- then every market counts once. Sells aren't forecasts. Otherwise ten 1-Clout bets outweigh one 100-Clout bet and flair can be farmed.
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_market_brier
 COMMENT 'Stake-weighted Brier per user and resolved market'
 AS SELECT user_id, market_id, course,
-          SUM(clout_spent * POW(forecast - won, 2)) / SUM(clout_spent) AS brier,
+          SUM(CASE WHEN side = 'buy' THEN clout_spent * POW(forecast - won, 2) END)
+            / NULLIF(SUM(CASE WHEN side = 'buy' THEN clout_spent END), 0) AS brier,
           SUM(won * shares - clout_spent) AS clout
 FROM the_curve.silver.trades_enriched WHERE is_resolved
 GROUP BY user_id, market_id, course;
@@ -35,7 +62,7 @@ CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_calibration
 COMMENT '10% forecast buckets: mean forecast vs hit rate, per user and overall (user_id = __all__)'
 AS WITH f AS (
   SELECT user_id, LEAST(9, GREATEST(0, FLOOR(forecast * 10))) AS bucket, forecast, won
-  FROM the_curve.silver.trades_enriched WHERE is_resolved
+  FROM the_curve.silver.trades_enriched WHERE is_resolved AND side = 'buy'
 )
 SELECT user_id, CAST(bucket AS INT) AS bucket, COUNT(*) AS n, AVG(forecast) AS mean_forecast, AVG(won) AS hit_rate
 FROM f GROUP BY user_id, bucket
@@ -69,12 +96,15 @@ SELECT *,
 FROM scoped;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_smart_money
-COMMENT 'Smart Money: stakes weighted by realized profit, profitable users only, vs crowd price'
-AS WITH stake AS (
-  SELECT t.market_id, t.outcome_index, SUM(c.realized_profit * t.clout_spent) AS w
-  FROM the_curve.silver.trades_enriched t JOIN the_curve.gold.user_clout c USING (user_id)
+COMMENT 'Smart Money: each profitable user's cost basis still held per outcome, weighted by realized profit, vs crowd price'
+AS WITH pos AS (
+  SELECT market_id, outcome_index, user_id, GREATEST(SUM(basis_change), 0) AS stake
+  FROM the_curve.silver.trades_enriched GROUP BY ALL
+), stake AS (
+  SELECT p.market_id, p.outcome_index, SUM(c.realized_profit * p.stake) AS w
+  FROM pos p JOIN the_curve.gold.user_clout c USING (user_id)
   WHERE c.realized_profit > 0
-  GROUP BY t.market_id, t.outcome_index
+  GROUP BY p.market_id, p.outcome_index
 )
 SELECT o.market_id, o.outcome_index, o.label, o.crowd_price,
        COALESCE(s.w, 0) / NULLIF(SUM(COALESCE(s.w, 0)) OVER (PARTITION BY o.market_id), 0) AS smart_price
@@ -94,18 +124,18 @@ GROUP BY ALL;
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_price_history
 COMMENT 'Per trade and outcome: crowd price after the trade and the running Smart Money price'
 AS WITH t AS (
-  SELECT t.trade_id, t.market_id, t.created_at, t.outcome_index AS bought, t.clout_spent, t.prices_after,
+  SELECT t.trade_id, t.market_id, t.created_at, t.outcome_index AS bought, t.basis_change, t.prices_after,
          GREATEST(c.realized_profit, 0) AS w
   FROM the_curve.silver.trades_enriched t JOIN the_curve.gold.user_clout c USING (user_id)
 ), x AS (
   SELECT t.trade_id, t.market_id, t.created_at, o.outcome_index, o.label,
          t.prices_after[o.outcome_index] AS crowd_price,
-         SUM(CASE WHEN t.bought = o.outcome_index THEN t.w * t.clout_spent ELSE 0 END)
+         SUM(CASE WHEN t.bought = o.outcome_index THEN t.w * t.basis_change ELSE 0 END)
            OVER (PARTITION BY t.market_id, o.outcome_index ORDER BY t.created_at, t.trade_id) AS cum_w
   FROM t JOIN the_curve.silver.outcomes o USING (market_id)
 )
 SELECT trade_id, market_id, created_at, outcome_index, label, crowd_price,
-       cum_w / NULLIF(SUM(cum_w) OVER (PARTITION BY trade_id), 0) AS smart_price
+       GREATEST(cum_w, 0) / NULLIF(SUM(GREATEST(cum_w, 0)) OVER (PARTITION BY trade_id), 0) AS smart_price
 FROM x;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_flair

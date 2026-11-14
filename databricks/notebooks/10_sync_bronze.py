@@ -32,12 +32,13 @@ TABLES = {  # postgres table -> bronze table
 }
 APPEND_ONLY = {"trades": "trade_id", "ai_questions": "question_id"}  # table -> primary key
 OVERLAP = "INTERVAL 1 HOUR"
-DROP_COLS = {"session_hash", "email"}
+# Never leave Lakebase: secrets/PII for sessions, and avatar image bytes (no analytics use; keeps bronze small).
+DROP_COLS = {"sessions": {"session_hash", "email"}, "users": {"avatar", "avatar_type"}}
 
 
 def source(pg):
     df = spark.table(f"{ledger}.public.{pg}")
-    df = df.drop(*[c for c in DROP_COLS if c in df.columns and pg in ("sessions", "login_tokens")])
+    df = df.drop(*[c for c in DROP_COLS.get(pg, ()) if c in df.columns])
     df = (df.withColumn("source", F.lit("lakebase"))
           .withColumn("ingested_at", F.current_timestamp()))
     for c, t in df.dtypes:  # Postgres timestamptz arrives as timestamp; keep bronze types stable

@@ -15,6 +15,8 @@ The Databricks base and a first version of the website are built and deployed (o
 - **Accounts:** passwordless university email login (pick your school, verify an email at its domain); accounts, sign-in tokens, sessions and schools live in Lakebase. REST API under `/api` (see §4 "REST API").
 - **Multi-university:** students from any university can join. Leaderboards exist for every school plus a school-vs-school league, and everyone can view every school's board.
 - **Resolution:** `POST /api/markets/:id/resolve` (500+ Clout, or an `ADMIN_EMAILS` account) pays 1 Clout per winning share into `users.clout` (or refunds every stake if voided), opens a 24h dispute window, and starts `yomi-refresh` so gold catches up in minutes. A resolve panel shows on the market page for eligible users.
+- **Selling + portfolio:** sell shares back to the LMSR any time before resolution (Buy/Sell toggle). Market pages have a live odds chart (Lakebase, every trade) with range buttons and a scrub slider, Smart Money dashed (gold), a "Your position" card, and Activity / Top holders tabs showing everyone's bets by @username. `/portfolio`: positions, P&L, trade history, Clout-over-time chart (gold `user_clout_history`).
+- **Profiles:** uploaded profile pictures (128px, in Lakebase, never synced to bronze) with an initials fallback; a title you pick from earned titles (Clout tiers in `core/titles.ts` + gold flair), shown in the header, comments and bets.
 - **Not built yet:** market proposal/upvotes, disputes (an overturn would have to reverse the payouts), Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
@@ -155,11 +157,14 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | GET | `/api/auth/session` | – | current user or `null` |
 | DELETE | `/api/auth/session` | – | sign out |
 | GET | `/api/me` | ✓ | Clout, available, open stake, Brier, rank |
-| PATCH | `/api/me` | ✓ | `{handle}` → pick or change your username (409 if taken) |
+| PATCH | `/api/me` | ✓ | `{handle?, title?}` → change username (409 if taken) and/or displayed title (must be earned; `null` = automatic) |
+| GET | `/api/me/portfolio?page=` | ✓ | summary, positions (open + settled), trade history (50/page), Clout history |
+| PUT / DELETE | `/api/me/avatar` | ✓ | raw image body (webp/png/jpeg, ≤ 64 KB; the UI resizes to 128px) / remove |
+| GET | `/api/users/:id/avatar` | – | profile picture (cache forever; URLs carry `?v=`) |
 | DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
 | GET | `/api/markets?q=&status=` | – | markets with live prices |
 | GET | `/api/markets/:id` | – | market, Smart Money, AI insight |
-| POST | `/api/markets/:id/trade` | ✓ | `{outcome, amount}` → spends Clout |
+| POST | `/api/markets/:id/trade` | ✓ | buy `{outcome, amount}` → spends Clout · sell `{side:"sell", outcome, shares}` → proceeds to balance |
 | GET / POST | `/api/markets/:id/comments` | – / ✓ | list / add |
 | DELETE | `/api/comments/:id` | ✓ | delete your own comment |
 | POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text), 10/hour |
@@ -227,7 +232,7 @@ Catalog: **`the_curve`**
 |---|---|
 | `bronze` | `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
 | `silver` | `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
+| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_clout_history` (true Clout after each sell/resolution, for the portfolio chart), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 
@@ -292,17 +297,19 @@ For outcomes `i` with outstanding shares `q_i` and liquidity `b`:
 - Max market-maker loss = `b * ln(N)`; pick `b` so a 10-Clout bet moves price by ~1 point.
 
 ### Clout balance
-- `STARTING_CLOUT = 100`. `canAfford(balance, amount)` = `0 < amount <= balance`. A bet deducts `amount` from `users.clout` in the same Lakebase transaction that records the trade (`app/src/server/markets.ts` `placeTrade`).
-- Gold: `user_clout.clout = 100 + realized_profit`, `available = clout - open_stake`.
+- `STARTING_CLOUT = 100`. `canAfford(balance, amount)` = `0 < amount <= balance`. A bet deducts `amount` from `users.clout` in the same Lakebase transaction that records the trade (`app/src/server/markets.ts` `placeBuy`).
+- **Selling (signed trades).** `placeSell` sells `k` shares back at the LMSR price: `sellProceeds(q,i,k) = C(q) − C(q − k·e_i)` (`applySell` in `lmsr.ts`/`clout.py`). Trades are signed: a sell has `shares = −k`, `clout_spent = −proceeds`, and `basis_change = −sellBasis(basis, position, k)` (average cost). Position = `Σ shares`; open stake (cost basis still held) = `Σ basis_change` (`openStakeSql` in `ledger.ts`, used everywhere); realized on a sell = proceeds − average cost removed. Can't sell more than you hold.
+- Trades lock the market row `FOR SHARE`, then the user, then the outcomes; `resolveMarket` takes the market `FOR UPDATE`, so no trade lands mid-resolution.
+- Gold: `user_clout.clout = 100 + realized_profit`, `available = clout - open_stake`. realized = resolved markets `Σ(won·shares − clout_spent)` + open markets `Σ(basis_change − clout_spent)` (profit taken by selling); voided markets count nothing.
 
 ### Payout
-- Each share of the winning outcome pays **1 Clout**; losing shares pay 0.
-- Net Clout change for a market = `Σ winning shares − Σ Clout spent`.
-- Voided market: stakes refunded, creator penalized.
+- Each winning share **still held** pays **1 Clout**; losing shares pay 0. With signed trades the payout is `Σ shares` on the winner.
+- Net Clout change for a market = `Σ winning shares − Σ clout_spent` (sells are negative, so proceeds count).
+- Voided market: each trader's net `Σ clout_spent` is credited back, which takes back profit taken by selling. (Creator penalty not built yet.)
 
 ### Brier score and calibration
 - Per forecast: `(f − o)²`, `f` = forecast probability, `o ∈ {0,1}`. User Brier: per resolved market, the stake-weighted mean of its trades' `(f − o)²`; then the plain mean over markets, so every market counts once (lower is better). `n_forecasts` = markets. Calibration is still per trade.
-- A trade's forecast `f` = **post-trade price** of the outcome the user bought.
+- A trade's forecast `f` = **post-trade price** of the outcome the user bought. Only buys are forecasts; Brier and calibration ignore sells. Smart Money weights each profitable user's cost basis still held per outcome (`GREATEST(Σ basis_change, 0)`).
 - Calibration curve: bucket forecasts into 10% bins; per bin, compare mean `f` to hit rate.
 
 ---

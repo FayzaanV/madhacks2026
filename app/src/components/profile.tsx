@@ -2,13 +2,27 @@ import { privileges } from "@/core/clout";
 import { UNIVERSITIES } from "@/core/universities";
 import Link from "next/link";
 import { querySql } from "@/server/warehouse";
+import { displayTitle } from "@/core/titles";
+import { Avatar } from "./avatar";
 import { Clout } from "./clout";
 
 type Stats = { school_id: string | null; clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null; rank: number | null };
 type Bin = { bucket: number; n: number; mean_forecast: number; hit_rate: number };
 
 /** Profile built from gold tables: Clout, Brier, calibration curve, flair. */
-export async function Profile({ userId, handle, liveClout }: { userId: string; handle: string; liveClout?: number }) {
+export async function Profile({
+  userId,
+  handle,
+  liveClout,
+  title,
+  avatarV,
+}: {
+  userId: string;
+  handle: string;
+  liveClout?: number;
+  title?: string | null;
+  avatarV?: number | null;
+}) {
   const [stats, bins, flair] = await Promise.all([
     querySql<Stats>(
       `SELECT c.school_id, c.clout, c.open_stake, c.n_trades, c.n_markets, b.brier, l.rank
@@ -32,8 +46,10 @@ export async function Profile({ userId, handle, liveClout }: { userId: string; h
   return (
     <div className="space-y-6">
       <section className="flex flex-wrap items-end gap-4">
+        <Avatar userId={userId} handle={handle} v={avatarV} size={80} />
         <div>
           <h1 className="text-2xl font-bold">@{handle}</h1>
+          <div className="text-sm font-semibold text-accent">{displayTitle(title, clout, flair.map((f) => f.flair))}</div>
           {s?.school_id && (
             <Link href={`/leaderboard?scope=school&value=${encodeURIComponent(s.school_id)}`} className="text-sm text-muted hover:text-accent">
               {UNIVERSITIES.find((u) => u.school_id === s.school_id)?.name ?? s.school_id.replace(/^edu-/, "")}

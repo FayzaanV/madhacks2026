@@ -2,9 +2,11 @@
 
 const ICON_COLORS = ["#7c3aed", "#9333ea", "#c026d3", "#6366f1", "#8b5cf6", "#a855f7", "#4f46e5", "#db2777"];
 
+/** Stable badge color for any key (course name, user id). */
+export const colorFor = (key: string) => ICON_COLORS[[...key].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % ICON_COLORS.length];
+
 /** Square course badge with initials, color hashed from the course name. */
 export function CourseIcon({ course, size = 36 }: { course: string; size?: number }) {
-  const hash = [...course].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7);
   const label =
     course === "campus"
       ? "UW"
@@ -18,7 +20,7 @@ export function CourseIcon({ course, size = 36 }: { course: string; size?: numbe
   return (
     <span
       className="inline-flex shrink-0 items-center justify-center rounded-lg font-bold text-white"
-      style={{ width: size, height: size, background: ICON_COLORS[hash % ICON_COLORS.length], fontSize: size * 0.28 }}
+      style={{ width: size, height: size, background: colorFor(course), fontSize: size * 0.28 }}
       aria-hidden
     >
       {label}

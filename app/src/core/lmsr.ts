@@ -44,4 +44,15 @@ export function applyTrade(q: readonly number[], i: number, amount: number, b = 
   return { newQ, shares, postPrice: prices(newQ, b)[i] };
 }
 
+/** Clout received for selling `shares` of outcome i back to the market maker: C(q) - C(q - shares*e_i). */
+export const sellProceeds = (q: readonly number[], i: number, shares: number, b = DEFAULT_B) =>
+  shares <= 0 ? 0 : -costToBuy(q, i, -shares, b);
+
+export function applySell(q: readonly number[], i: number, shares: number, b = DEFAULT_B) {
+  const proceeds = sellProceeds(q, i, shares, b);
+  const newQ = [...q];
+  newQ[i] -= shares;
+  return { newQ, proceeds, postPrice: prices(newQ, b)[i] };
+}
+
 export const maxMarketMakerLoss = (nOutcomes: number, b = DEFAULT_B) => b * Math.log(nOutcomes);

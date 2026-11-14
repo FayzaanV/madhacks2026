@@ -40,11 +40,11 @@ LEFT JOIN (SELECT market_id, COUNT(*) AS n_outcomes FROM the_curve.bronze.outcom
   USING (market_id);
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.trades_enriched
-COMMENT 'Trade + market + user. forecast = post-trade price of the outcome bought.'
-AS SELECT t.trade_id, t.market_id, t.user_id, t.outcome_index, t.clout_spent, t.shares,
+COMMENT 'Trade + market + user. Signed: sells have negative shares/clout_spent/basis_change. forecast = post-trade price (buys only count as forecasts).'
+AS SELECT t.trade_id, t.market_id, t.user_id, t.outcome_index, t.side, t.clout_spent, t.shares, t.basis_change,
           t.price_before, t.post_price AS forecast, t.prices_after, t.created_at, t.is_simulated,
           m.course, m.question, m.market_type, m.status AS market_status, m.is_resolved,
-          m.winning_outcome_index,
+          m.winning_outcome_index, m.resolved_at,
           CASE WHEN m.is_resolved THEN CAST(t.outcome_index = m.winning_outcome_index AS INT) END AS won,
           u.handle, u.major, u.dorm, u.club, u.archetype
 FROM the_curve.bronze.trades_raw t

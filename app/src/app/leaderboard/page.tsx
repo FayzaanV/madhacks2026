@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
+import { Avatar } from "@/components/avatar";
 import { Clout } from "@/components/clout";
 import { UNIVERSITIES } from "@/core/universities";
 import { querySql } from "@/server/warehouse";
@@ -216,7 +217,9 @@ function Table({
                   )}
                 </td>
                 <td>
-                  <Link href={`/u/${r.user_id}`} className="font-medium hover:text-accent">
+                  <Link href={`/u/${r.user_id}`} className="inline-flex items-center gap-2 font-medium hover:text-accent">
+                    {/* Leaderboard rows come from gold, which has no avatar data; initials avatar only. */}
+                    <Avatar userId={r.user_id} handle={r.handle} size={24} />
                     @{r.handle}
                   </Link>
                   {showSchool && <SchoolBadge id={r.school_id} />}

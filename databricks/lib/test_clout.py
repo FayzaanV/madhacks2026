@@ -28,6 +28,17 @@ class TestVectors(unittest.TestCase):
             self.assertTrue(math.isclose(c.cost_to_buy(q, i, shares, b), a, rel_tol=1e-9, abs_tol=1e-6))
             self.assertTrue(close(c.apply_trade(q, i, a, b)[2], v["post_price"]))
 
+    def test_sell(self):
+        for v in V["sell"]:
+            q2, proceeds, post = c.apply_sell(v["q"], v["i"], v["shares"], v["b"])
+            self.assertTrue(close(proceeds, v["proceeds"]))
+            self.assertTrue(close(post, v["post_price"]))
+            self.assertEqual(q2, v["new_q"])
+        for v in V["round_trip"]:  # buy then sell the same shares: get the stake back
+            self.assertTrue(math.isclose(v["proceeds"], v["amount"], rel_tol=1e-9, abs_tol=1e-6))
+        for v in V["sell_basis"]:
+            self.assertTrue(close(c.sell_basis(v["basis"], v["position"], v["shares"]), v["removed"]))
+
     def test_rules(self):
         self.assertEqual(c.STARTING_CLOUT, V["starting_clout"])
         for v in V["can_afford"]:
