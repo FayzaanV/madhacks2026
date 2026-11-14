@@ -1,7 +1,8 @@
 @import "tailwindcss";
 
-/* Yomi theme: deep purple board, violet accent. Dark is the primary look. */
+/* Yomi theme: light only, violet accent. (Dark mode was removed on purpose; don't add a prefers-color-scheme block.) */
 :root {
+  color-scheme: light;
   --bg: #f6f4fb;
   --panel: #ffffff;
   --panel-2: #f0ecf9;
@@ -16,25 +17,6 @@
   --no: #c2283a;
   --no-soft: #fbe2e5;
   --smart: #a21caf;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #110d1f;
-    --panel: #1b1630;
-    --panel-2: #241e3d;
-    --ink: #f2eefc;
-    --muted: #9b93b8;
-    --line: #2e2750;
-    --accent: #8b5cf6;
-    --accent-ink: #ffffff;
-    --accent-soft: #2c2252;
-    --yes: #3ddc84;
-    --yes-soft: #163b2a;
-    --no: #ff5c6c;
-    --no-soft: #43202a;
-    --smart: #e879f9;
-  }
 }
 
 @theme inline {
