@@ -33,6 +33,10 @@ export function AskAnalyst({ marketId, insight }: { marketId: string; insight: I
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: q }),
       });
+      if (res.status === 401) {
+        setError("Sign in with your @wisc.edu email to ask the AI analyst.");
+        return;
+      }
       if (!res.ok || !res.body) {
         setError((await res.json().catch(() => ({}))).error ?? "The AI analyst is unavailable.");
         return;

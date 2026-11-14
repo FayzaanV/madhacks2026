@@ -18,10 +18,13 @@ TABLES = {  # postgres table -> bronze table
     "users": "users_raw", "markets": "markets_raw", "outcomes": "outcomes_raw", "trades": "trades_raw",
     "resolutions": "resolutions_raw", "comments": "comments_raw", "disputes": "disputes_raw",
     "ai_questions": "ai_questions_raw",
+    "sessions": "sessions_raw",          # session_hash is dropped below; login_tokens are never synced
 }
+DROP_COLS = {"session_hash", "email"}
 for pg, bronze in TABLES.items():
-    df = (spark.table(f"{ledger}.public.{pg}")
-          .withColumn("source", F.lit("lakebase"))
+    df = spark.table(f"{ledger}.public.{pg}")
+    df = df.drop(*[c for c in DROP_COLS if c in df.columns and pg in ("sessions", "login_tokens")])
+    df = (df.withColumn("source", F.lit("lakebase"))
           .withColumn("ingested_at", F.current_timestamp()))
     for c, t in df.dtypes:  # Postgres timestamptz arrives as timestamp; keep bronze types stable
         if t.startswith("decimal"):

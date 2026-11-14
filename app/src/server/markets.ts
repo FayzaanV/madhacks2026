@@ -1,6 +1,6 @@
 import "server-only";
 import { applyTrade, prices } from "@/core/lmsr";
-import { maxBet } from "@/core/clout";
+import { canAfford } from "@/core/clout";
 import { q, tx } from "./ledger";
 import { querySql } from "./warehouse";
 
@@ -45,11 +45,14 @@ export async function getMarket(id: string): Promise<Market | null> {
   return rows[0] ? withPrices(rows[0]) : null;
 }
 
-export type Comment = { comment_id: string; handle: string; clout: number; body: string; created_at: string };
+export type Comment = { comment_id: string; user_id: string; handle: string; clout: number; body: string; created_at: string };
 export async function getComments(id: string): Promise<Comment[]> {
   return q<Comment>(
-    `SELECT c.comment_id, u.handle, u.clout, c.body, c.created_at FROM comments c JOIN users u USING (user_id)
-     WHERE c.market_id = $1 ORDER BY c.created_at DESC LIMIT 30`,
+    `SELECT c.comment_id, c.user_id, u.handle, c.body, c.created_at,
+            u.clout + coalesce((SELECT sum(t.clout_spent) FROM trades t JOIN markets m2 USING (market_id)
+                                WHERE t.user_id = u.user_id AND m2.status NOT IN ('resolved','final','voided')), 0)::float AS clout
+     FROM comments c JOIN users u USING (user_id)
+     WHERE c.market_id = $1 AND c.deleted_at IS NULL ORDER BY c.created_at DESC LIMIT 30`,
     [id],
   );
 }
@@ -81,34 +84,33 @@ export async function smartMoney(id: string): Promise<SmartMoney[]> {
   );
 }
 
-export class TradeError extends Error {}
+export class TradeError extends Error {
+  constructor(message: string, public status = 400) {
+    super(message);
+  }
+}
 
 /**
- * Place a bet: one Postgres transaction that locks the market's outcomes, runs the shared LMSR math,
- * enforces max(10, 0.1 * clout) on the user's total stake in this market, and records the trade.
+ * Place a bet: one Postgres transaction that locks the user's balance and the market's outcomes, runs the
+ * shared LMSR math, spends the Clout (balance cap: you can't bet more than you have), and records the trade.
+ * Winning shares pay 1 Clout each when the market resolves.
  */
 export async function placeTrade(userId: string, marketId: string, outcomeIndex: number, amount: number) {
   if (!(amount > 0) || !Number.isFinite(amount)) throw new TradeError("Bet must be a positive amount of Clout.");
+  amount = Math.round(amount * 100) / 100;
   return tx(async (c) => {
-    const m = (await c.query("SELECT status, liquidity_b, course FROM markets WHERE market_id = $1", [marketId])).rows[0];
-    if (!m) throw new TradeError("Market not found.");
+    const m = (await c.query("SELECT status, liquidity_b FROM markets WHERE market_id = $1", [marketId])).rows[0];
+    if (!m) throw new TradeError("Market not found.", 404);
     if (m.status !== "live") throw new TradeError("This market is not open for trading.");
-    const u = (await c.query("SELECT clout, is_instructor FROM users WHERE user_id = $1 FOR UPDATE", [userId])).rows[0];
+    const u = (await c.query("SELECT clout FROM users WHERE user_id = $1 FOR UPDATE", [userId])).rows[0];
+    if (!canAfford(u.clout, amount))
+      throw new TradeError(`You only have ${Math.max(0, u.clout).toFixed(1)} Clout available.`);
     const os = (
       await c.query("SELECT outcome_index, q_shares FROM outcomes WHERE market_id = $1 ORDER BY outcome_index FOR UPDATE", [
         marketId,
       ])
     ).rows as { outcome_index: number; q_shares: number }[];
     if (!os[outcomeIndex]) throw new TradeError("Unknown outcome.");
-    const staked = Number(
-      (await c.query("SELECT coalesce(sum(clout_spent),0) AS s FROM trades WHERE user_id=$1 AND market_id=$2", [userId, marketId]))
-        .rows[0].s,
-    );
-    const limit = maxBet(u.clout);
-    if (staked + amount > limit + 1e-9)
-      throw new TradeError(
-        `Max stake in this market is ${limit.toFixed(1)} Clout (max(10, 10% of your Clout)); you have ${(limit - staked).toFixed(1)} left.`,
-      );
     const q0 = os.map((o) => o.q_shares);
     const before = prices(q0, m.liquidity_b)[outcomeIndex];
     const { newQ, shares, postPrice } = applyTrade(q0, outcomeIndex, amount, m.liquidity_b);
@@ -117,6 +119,8 @@ export async function placeTrade(userId: string, marketId: string, outcomeIndex:
       outcomeIndex,
       newQ[outcomeIndex],
     ]);
+    const balance = (await c.query("UPDATE users SET clout = clout - $2 WHERE user_id = $1 RETURNING clout", [userId, amount]))
+      .rows[0].clout as number;
     const tradeId = `t-${crypto.randomUUID()}`;
     await c.query(
       `INSERT INTO trades (trade_id, market_id, user_id, outcome_index, clout_spent, shares, price_before, post_price,
@@ -124,17 +128,24 @@ export async function placeTrade(userId: string, marketId: string, outcomeIndex:
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
       [tradeId, marketId, userId, outcomeIndex, amount, shares, before, postPrice, prices(newQ, m.liquidity_b), u.clout],
     );
-    return { tradeId, shares, priceBefore: before, priceAfter: postPrice, remaining: limit - staked - amount };
+    return { tradeId, shares, priceBefore: before, priceAfter: postPrice, balance };
   });
 }
 
 export async function addComment(userId: string, marketId: string, body: string) {
   const text = body.trim().slice(0, 500);
   if (!text) throw new TradeError("Comment is empty.");
-  await q("INSERT INTO comments (comment_id, market_id, user_id, body) VALUES ($1,$2,$3,$4)", [
-    `c-${crypto.randomUUID()}`,
-    marketId,
-    userId,
-    text,
-  ]);
+  const exists = await q("SELECT 1 FROM markets WHERE market_id = $1", [marketId]);
+  if (!exists.length) throw new TradeError("Market not found.", 404);
+  const commentId = `c-${crypto.randomUUID()}`;
+  await q("INSERT INTO comments (comment_id, market_id, user_id, body) VALUES ($1,$2,$3,$4)", [commentId, marketId, userId, text]);
+  return { commentId };
+}
+
+/** Soft-delete your own comment. */
+export async function deleteComment(userId: string, commentId: string) {
+  const rows = await q<{ user_id: string }>("SELECT user_id FROM comments WHERE comment_id = $1 AND deleted_at IS NULL", [commentId]);
+  if (!rows[0]) throw new TradeError("Comment not found.", 404);
+  if (rows[0].user_id !== userId) throw new TradeError("You can only delete your own comments.", 403);
+  await q("UPDATE comments SET deleted_at = now() WHERE comment_id = $1", [commentId]);
 }

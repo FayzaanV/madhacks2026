@@ -2,10 +2,13 @@
 -- Formulas mirror databricks/lib/clout.py (payout, Brier, calibration, Smart Money).
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_clout
-COMMENT 'True Clout = sum over resolved markets of (winning shares - Clout spent). No floor.'
+COMMENT 'Clout = 100 + realized profit (resolved winning shares - resolved spend). available = Clout - open stakes.'
 AS SELECT u.user_id, u.handle, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
-          COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS clout,
+          100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS clout,
+          COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS realized_profit,
           COALESCE(SUM(CASE WHEN NOT t.is_resolved THEN t.clout_spent END), 0) AS open_stake,
+          100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0)
+              - COALESCE(SUM(CASE WHEN NOT t.is_resolved THEN t.clout_spent END), 0) AS available,
           COUNT(t.trade_id) AS n_trades,
           COUNT(DISTINCT t.market_id) AS n_markets
 FROM the_curve.silver.users u
@@ -56,11 +59,11 @@ SELECT *,
 FROM scoped;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_smart_money
-COMMENT 'Smart Money: Clout-weighted split of stakes, positive-Clout users only, vs crowd price'
+COMMENT 'Smart Money: stakes weighted by realized profit, profitable users only, vs crowd price'
 AS WITH stake AS (
-  SELECT t.market_id, t.outcome_index, SUM(c.clout * t.clout_spent) AS w
+  SELECT t.market_id, t.outcome_index, SUM(c.realized_profit * t.clout_spent) AS w
   FROM the_curve.silver.trades_enriched t JOIN the_curve.gold.user_clout c USING (user_id)
-  WHERE c.clout > 0
+  WHERE c.realized_profit > 0
   GROUP BY t.market_id, t.outcome_index
 )
 SELECT o.market_id, o.outcome_index, o.label, o.crowd_price,
@@ -82,7 +85,7 @@ CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_price_history
 COMMENT 'Per trade and outcome: crowd price after the trade and the running Smart Money price'
 AS WITH t AS (
   SELECT t.trade_id, t.market_id, t.created_at, t.outcome_index AS bought, t.clout_spent, t.prices_after,
-         GREATEST(c.clout, 0) AS w
+         GREATEST(c.realized_profit, 0) AS w
   FROM the_curve.silver.trades_enriched t JOIN the_curve.gold.user_clout c USING (user_id)
 ), x AS (
   SELECT t.trade_id, t.market_id, t.created_at, o.outcome_index, o.label,

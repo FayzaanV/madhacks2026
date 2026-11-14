@@ -29,10 +29,9 @@ class TestVectors(unittest.TestCase):
             self.assertTrue(close(c.apply_trade(q, i, a, b)[2], v["post_price"]))
 
     def test_rules(self):
-        for v in V["max_bet"]:
-            self.assertEqual(c.max_bet(v["clout"]), v["max_bet"])
-        for v in V["remaining_bet"]:
-            self.assertEqual(c.remaining_bet(v["clout"], v["staked"]), v["remaining"])
+        self.assertEqual(c.STARTING_CLOUT, V["starting_clout"])
+        for v in V["can_afford"]:
+            self.assertEqual(c.can_afford(v["balance"], v["amount"]), v["ok"])
         for v in V["privileges"]:
             self.assertEqual(c.privileges(v["clout"]), v["privileges"])
         for v in V["net_clout_change"]:
@@ -62,8 +61,9 @@ class TestProperties(unittest.TestCase):
         _, _, post = c.apply_trade([0, 0], 0, 10)
         self.assertTrue(0.005 < post - 0.5 < 0.015)
 
-    def test_min_bet_always_allowed(self):
-        self.assertEqual(c.max_bet(-10_000), 10)
+    def test_cannot_bet_more_than_balance(self):
+        self.assertTrue(c.can_afford(100, 100))
+        self.assertFalse(c.can_afford(100, 101))
 
 
 if __name__ == "__main__":

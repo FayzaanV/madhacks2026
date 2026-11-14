@@ -1,7 +1,6 @@
 // Clout rules. Mirror of databricks/lib/clout.py.
 
-export const MIN_BET = 10;
-export const MAX_BET_FRACTION = 0.1;
+export const STARTING_CLOUT = 100; // every account starts here
 
 export const TIERS = [
   { min: 250, privilege: "propose" },
@@ -9,11 +8,8 @@ export const TIERS = [
   { min: 1000, privilege: "moderate" },
 ] as const;
 
-/** Max total stake per market = max(10, 0.1 * clout). Always at least 10. */
-export const maxBet = (clout: number) => Math.max(MIN_BET, MAX_BET_FRACTION * clout);
-
-export const remainingBet = (clout: number, alreadyStaked: number) =>
-  Math.max(0, maxBet(clout) - alreadyStaked);
+/** Betting spends Clout immediately; you can bet any amount up to your balance. */
+export const canAfford = (balance: number, amount: number) => amount > 0 && amount <= balance + 1e-9;
 
 export function privileges(clout: number): string[] {
   const out = ["trade", "comment"];
@@ -22,8 +18,8 @@ export function privileges(clout: number): string[] {
 }
 
 /**
- * Smart Money line: Clout-weighted split of stakes, positive-Clout users only.
- * stakes: [userClout, outcomeIndex, cloutStaked]. Returns null if no positive-Clout stake.
+ * Smart Money line: stakes weighted by each user's realized profit, profitable users only.
+ * stakes: [weight, outcomeIndex, cloutStaked], weight = realized profit. Returns null if nobody profitable staked.
  */
 export function smartMoney(
   stakes: readonly (readonly [number, number, number])[],

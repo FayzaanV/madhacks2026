@@ -11,7 +11,8 @@
 
 The Databricks base and a first version of the website are built and deployed (on `main`):
 - **Data:** simulated campus in `the_curve.bronze`, Lakeflow pipeline producing silver/gold, Lakebase ledger seeded with the same data.
-- **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: markets, betting, AI analyst, comments, leaderboard, profiles.
+- **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: purple board UI, markets, betting, AI analyst, comments, leaderboard, profiles.
+- **Accounts:** passwordless `@wisc.edu` email login; accounts, sign-in tokens and sessions live in Lakebase. REST API under `/api` (see §4 "REST API").
 - **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
@@ -40,10 +41,11 @@ The Databricks base and a first version of the website are built and deployed (o
 ## 2. Core feature: prediction markets with Clout
 
 ### Clout rules (implement exactly)
-- Everyone starts at **0 Clout**.
-- A user can **always** bet at least **10 Clout**, even with low or negative Clout.
-- **Max bet per market = `max(10, 0.1 * clout)`**.
-- Wins add to true Clout, losses subtract. **No floor**: Clout can go negative.
+- Everyone starts at **100 Clout** (`STARTING_CLOUT`).
+- **No per-market limiter.** The only cap is your balance: betting **spends Clout immediately**, and you can't bet more than you have **available**.
+- Each winning share pays **1 Clout** when the market resolves; losing shares pay 0.
+- **Clout** (shown everywhere, ranked on leaderboards) = `100 + realized profit` = available balance + Clout tied up in open bets. **Available** = what you can bet right now (`users.clout` in the ledger).
+- Betting alone can't push you below 0. Penalties (voided market, overturned resolution) can; negative Clout renders in red.
 - True Clout is shown everywhere (profile, comments, leaderboards). **Negative Clout renders in red.**
 - No real money anywhere. No purchasing Clout.
 
@@ -80,7 +82,7 @@ LMSR automated market maker with a configurable liquidity parameter `b` (per mar
 - **Leaderboards** by course, major, dorm, club, plus a **Hall of Shame** (bottom of the board).
 - **Calibration score** on every profile ("when you say 70%, you're right 71% of the time"), based on Brier score.
 - **Flair**, e.g. "Oracle of Econ 301", "Inverse Oracle".
-- **Smart Money line:** a second price line per market, weighted by Clout, counting only users with positive Clout.
+- **Smart Money line:** a second price line per market, stakes weighted by each user's **realized profit**, counting only users who have made Clout (profit > 0).
 - **Fade button:** bet against the bottom-ranked forecasters' net position in this market.
 
 ### AI market analyst (built)
@@ -92,7 +94,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 - Next AI features (not built): **AI resolver** (propose outcome from an announcement; a 500+ human confirms) and **Syllabus→Markets**, both via `ai_query`.
 
 ### Rules and safety
-- `wisc.edu` login only, one account per student. **Current build:** identity comes from Databricks Apps (`X-Forwarded-Email`), so only workspace members can open the app; a public `wisc.edu` sign-in is a later item.
+- `wisc.edu` login only, one account per email (see "Accounts and login" in §4). Note: the app is hosted on Databricks Apps, which puts a Databricks sign-in in front of it, so only workspace members can reach it until it's hosted publicly.
 - No markets about individual students.
 - Instructors/TAs cannot trade on their own course's markets.
 - All demo data is **simulated** and must be **labeled as such** in the UI.
@@ -131,6 +133,30 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 1. Workspace → avatar → **Settings → Linked accounts → Git integration → GitHub → Link**, and authorize the Databricks GitHub App for `FayzaanV/madhacks2026`.
 2. **Workspace → Create → Git folder** → `https://github.com/FayzaanV/madhacks2026`. Pull, branch, and commit from the workspace.
 3. Deploy with the CLI from a laptop or the Git folder: `databricks bundle deploy -t dev`.
+
+### Accounts and login (wisc.edu, passwordless)
+- `POST /api/auth/request {email}` accepts only `@wisc.edu`, rate-limits to 3 links per email per 15 min, stores the **SHA-256** of a random token in Lakebase `login_tokens` (15 min, single use), and emails `/login/verify?token=…` via **Resend**. Without `RESEND_API_KEY` it returns the link as `devLink` and the login page shows it (demo mode).
+- `/login/verify` needs a click (POST to `/api/auth/verify`) so email link scanners can't use up the token. Verifying creates the user if new (100 Clout) and a session: random id in an `httpOnly`, `Secure`, `SameSite=Lax` cookie `curve_session`; only its SHA-256 is stored in `sessions` (30 days).
+- No passwords anywhere. Sign-in links only point at `APP_ORIGIN`, localhost, or `the-curve-*.databricksapps.com` (forged Host headers are rejected).
+- `sessions` sync to `bronze.sessions_raw` without the hash or email; `login_tokens` never leave Lakebase. Code: `app/src/server/auth.ts`.
+- **Resend key:** create it at resend.com, then `databricks secrets create-scope the-curve` (once) and `databricks secrets put-secret the-curve resend_api_key`. Add a `secret` app resource for it in `resources/app.yml` and `RESEND_API_KEY` `valueFrom` in `app/app.yaml`. Locally put it in `app/.env.local`. Until a domain is verified in Resend, it only delivers to the Resend account owner's own address; set `RESEND_FROM` once a domain is verified.
+
+### REST API (all data on Databricks: Lakebase for the ledger, SQL warehouse for gold)
+| Method | Route | Auth | What |
+|---|---|---|---|
+| POST | `/api/auth/request` | – | email a sign-in link |
+| POST | `/api/auth/verify` | – | token → session cookie |
+| GET | `/api/auth/session` | – | current user or `null` |
+| DELETE | `/api/auth/session` | – | sign out |
+| GET | `/api/me` | ✓ | Clout, available, open stake, Brier, rank |
+| DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
+| GET | `/api/markets?q=&status=` | – | markets with live prices |
+| GET | `/api/markets/:id` | – | market, Smart Money, AI insight |
+| POST | `/api/markets/:id/trade` | ✓ | `{outcome, amount}` → spends Clout |
+| GET / POST | `/api/markets/:id/comments` | – / ✓ | list / add |
+| DELETE | `/api/comments/:id` | ✓ | delete your own comment |
+| POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text) |
+Errors are `{ "error": "…" }` with 400/401/403/404/429. Route handlers are thin wrappers over `app/src/server/*`.
 
 ### Running things
 ```
@@ -197,7 +223,7 @@ DATABRICKS_CATALOG=the_curve
 DATABASE_URL=                   # Lakebase or Supabase Postgres
 AUTH_SECRET=
 ```
-Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Set `DEV_USER_EMAIL` to pick which ledger user you are. On Databricks Apps, credentials come from the app's service principal and its resources.
+Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Sign in at `http://localhost:3000/login` with any `@wisc.edu` address; without `RESEND_API_KEY` the sign-in link is shown on screen (demo mode). On Databricks Apps, credentials come from the app's service principal and its resources.
 
 ---
 
@@ -230,7 +256,7 @@ Numbered notebook prefixes = run order. The TS core lives in `app/src/core` (not
 All of this lives in **one shared module** (`app/src/core/*.ts`, mirrored in `databricks/lib/clout.py`) with **unit tests** that both run against `lib/test-vectors.json`: `cd app && npm test` and `cd databricks/lib && python3 -m unittest test_clout`. The Python file is the reference: change it, run `python3 scripts/gen_test_vectors.py`, then make the TS pass. The gold SQL (`databricks/pipelines/gold.sql`) restates payout, Brier, calibration and Smart Money in SQL; keep it in step. Never reimplement these formulas anywhere else.
 
 - **`b` default = 500**: a 10-Clout bet moves a 50/50 binary market by ~1 point.
-- **Smart Money:** per outcome, `Σ clout_u · stake_u,k / Σ clout_u · stake_u` over users with Clout > 0 (`smart_money` / `smartMoney`).
+- **Smart Money:** per outcome, `Σ profit_u · stake_u,k / Σ profit_u · stake_u` over users with realized profit > 0 (`smart_money` / `smartMoney`; callers pass profit as the weight).
 - **Known quirk to revisit:** with forecast = post-trade price of the outcome bought, someone who buys a 5% long shot and loses gets a *good* Brier (0.05² ≈ 0.003). The Hall of Shame therefore shows losers with low Brier.
 
 ### LMSR
@@ -243,8 +269,9 @@ For outcomes `i` with outstanding shares `q_i` and liquidity `b`:
 - Use log-sum-exp (subtract `max q / b`) to avoid overflow.
 - Max market-maker loss = `b * ln(N)`; pick `b` so a 10-Clout bet moves price by ~1 point.
 
-### Clout bet limit
-- `maxBet(clout) = max(10, 0.1 * clout)` — applies to the user's **total stake in that market**.
+### Clout balance
+- `STARTING_CLOUT = 100`. `canAfford(balance, amount)` = `0 < amount <= balance`. A bet deducts `amount` from `users.clout` in the same Lakebase transaction that records the trade (`app/src/server/markets.ts` `placeTrade`).
+- Gold: `user_clout.clout = 100 + realized_profit`, `available = clout - open_stake`.
 
 ### Payout
 - Each share of the winning outcome pays **1 Clout**; losing shares pay 0.

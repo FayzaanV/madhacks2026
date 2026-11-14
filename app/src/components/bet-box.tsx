@@ -12,12 +12,12 @@ type Props = {
   outcomes: { index: number; label: string; price: number }[];
   liquidityB: number;
   qShares: number[];
-  remaining: number;
-  limit: number;
+  available: number | null; // null = signed out
 };
 
 /** Trade panel: pick an outcome, choose Clout, preview with the shared LMSR core, place the bet. */
-export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShares, remaining, limit }: Props) {
+export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShares, available }: Props) {
+  const remaining = available ?? 0;
   const router = useRouter();
   const { pick, setPick } = usePick();
   const [amount, setAmount] = useState(0);
@@ -40,6 +40,7 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
     });
     const j = await res.json();
     setBusy(false);
+    if (res.status === 401) return router.push("/login");
     if (!res.ok) return setMsg({ ok: false, text: j.error });
     setMsg({
       ok: true,
@@ -49,7 +50,11 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
     router.refresh();
   }
 
-  const add = (v: number) => setAmount((a) => Math.min(Math.round((a + v) * 10) / 10, Math.floor(remaining * 10) / 10));
+  const add = (v: number) =>
+    setAmount((a) => {
+      const next = Math.round((a + v) * 10) / 10;
+      return available == null ? next : Math.min(next, Math.floor(remaining * 10) / 10);
+    });
 
   return (
     <div className="rounded-2xl border border-line bg-panel p-4">
@@ -94,7 +99,7 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
         <div>
           <div className="font-medium">Amount</div>
           <div className="text-xs text-muted">
-            {remaining.toFixed(1)} of {limit.toFixed(1)} left here
+            {available == null ? "Sign in to bet" : `Available: ${remaining.toFixed(1)} Clout`}
           </div>
         </div>
         <label className="flex items-baseline gap-1">
@@ -133,15 +138,21 @@ export function BetBox({ marketId, question, binary, outcomes, liquidityB, qShar
         </dl>
       )}
 
-      <button
-        disabled={busy || !(amount > 0)}
-        onClick={submit}
-        className="mt-4 w-full rounded-xl bg-accent py-3 font-semibold text-accent-ink transition hover:brightness-110 disabled:opacity-40"
-      >
-        {busy ? "Placing…" : amount > 0 ? `Bet ${amount} Clout` : "Enter an amount"}
-      </button>
+      {available == null ? (
+        <a href="/login" className="mt-4 block w-full rounded-xl bg-accent py-3 text-center font-semibold text-accent-ink">
+          Sign in to bet
+        </a>
+      ) : (
+        <button
+          disabled={busy || !(amount > 0)}
+          onClick={submit}
+          className="mt-4 w-full rounded-xl bg-accent py-3 font-semibold text-accent-ink transition hover:brightness-110 disabled:opacity-40"
+        >
+          {busy ? "Placing…" : amount > 0 ? `Bet ${amount} Clout` : "Enter an amount"}
+        </button>
+      )}
       {msg && <p className={`mt-2 text-sm ${msg.ok ? "text-yes" : "text-no"}`}>{msg.text}</p>}
-      <p className="mt-3 text-center text-xs text-muted">Max stake per market = max(10, 10% of your Clout). No real money.</p>
+      <p className="mt-3 text-center text-xs text-muted">Betting spends Clout now; each winning share pays 1 Clout at resolution. No real money.</p>
     </div>
   );
 }

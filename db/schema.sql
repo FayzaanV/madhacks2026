@@ -13,7 +13,8 @@ CREATE TABLE IF NOT EXISTS users (
   class_year    int,
   archetype     text,                      -- simulation only; null for real users
   is_instructor boolean NOT NULL DEFAULT false,
-  clout         double precision NOT NULL DEFAULT 0,   -- true Clout, no floor
+  clout         double precision NOT NULL DEFAULT 100, -- AVAILABLE balance: bets spend it, payouts credit it.
+                                                       -- True Clout = clout + open stakes = 100 + realized profit.
   is_simulated  boolean NOT NULL DEFAULT false,
   created_at    timestamptz NOT NULL DEFAULT now()
 );
@@ -102,3 +103,32 @@ CREATE TABLE IF NOT EXISTS ai_questions (
   latency_ms   int,
   created_at   timestamptz NOT NULL DEFAULT now()
 );
+
+-- ------------------------------------------------------------------ accounts + login (wisc.edu magic links)
+-- Idempotent migrations for databases created before these columns existed.
+ALTER TABLE users ALTER COLUMN clout SET DEFAULT 100;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at timestamptz;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+ALTER TABLE comments ADD COLUMN IF NOT EXISTS deleted_at timestamptz;
+
+-- One-time sign-in links. Only the SHA-256 of the token is stored; tokens never leave Lakebase.
+CREATE TABLE IF NOT EXISTS login_tokens (
+  token_hash  text PRIMARY KEY,
+  email       text NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  expires_at  timestamptz NOT NULL,
+  used_at     timestamptz
+);
+CREATE INDEX IF NOT EXISTS login_tokens_email_idx ON login_tokens (email, created_at);
+
+-- Browser sessions (httpOnly cookie holds the raw id; only its SHA-256 is stored).
+CREATE TABLE IF NOT EXISTS sessions (
+  session_hash text PRIMARY KEY,
+  session_id   text UNIQUE NOT NULL DEFAULT ('s-' || gen_random_uuid()),  -- non-secret id for analytics
+  user_id      text NOT NULL REFERENCES users(user_id),
+  user_agent   text,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  expires_at   timestamptz NOT NULL,
+  revoked_at   timestamptz
+);
+CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);

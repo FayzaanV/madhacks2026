@@ -1,15 +1,13 @@
-import { placeTrade, TradeError } from "@/server/markets";
-import { currentUser } from "@/server/user";
+import { handle, readJson } from "@/server/api";
+import { requireUser } from "@/server/auth";
+import { placeTrade } from "@/server/markets";
 
+/** POST /api/markets/:id/trade { outcome, amount } -> spends Clout, moves the LMSR price. Sign-in required. */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const { outcome, amount } = (await req.json()) as { outcome: number; amount: number };
-  const user = await currentUser();
-  try {
+  return handle(async () => {
+    const { id } = await params;
+    const user = await requireUser();
+    const { outcome, amount } = await readJson<{ outcome: number; amount: number }>(req);
     return Response.json(await placeTrade(user.user_id, id, Number(outcome), Number(amount)));
-  } catch (e) {
-    if (e instanceof TradeError) return Response.json({ error: e.message }, { status: 400 });
-    console.error(e);
-    return Response.json({ error: "Trade failed. Try again." }, { status: 500 });
-  }
+  });
 }

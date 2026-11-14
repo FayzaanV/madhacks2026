@@ -35,3 +35,19 @@ export function CommentBox({ marketId }: { marketId: string }) {
     </form>
   );
 }
+
+export function DeleteCommentButton({ commentId }: { commentId: string }) {
+  const router = useRouter();
+  return (
+    <button
+      onClick={async () => {
+        const res = await fetch(`/api/comments/${commentId}`, { method: "DELETE" });
+        if (res.ok) router.refresh();
+      }}
+      className="ml-auto text-muted hover:text-no"
+      aria-label="Delete comment"
+    >
+      Delete
+    </button>
+  );
+}

@@ -10,8 +10,7 @@ import math
 from typing import Iterable, Sequence
 
 DEFAULT_B = 500.0          # a 10-Clout bet moves a 50/50 binary market by ~1 point
-MIN_BET = 10.0
-MAX_BET_FRACTION = 0.1
+STARTING_CLOUT = 100.0     # every account starts here
 
 TIERS = (                  # (min clout, privilege)
     (1000, "moderate"),
@@ -73,14 +72,9 @@ def max_market_maker_loss(n_outcomes: int, b: float = DEFAULT_B) -> float:
 
 
 # ---------------------------------------------------------------- Clout rules
-def max_bet(clout: float) -> float:
-    """Max total stake per market = max(10, 0.1 * clout). Always at least 10."""
-    return max(MIN_BET, MAX_BET_FRACTION * clout)
-
-
-def remaining_bet(clout: float, already_staked: float) -> float:
-    """How much more this user may stake in a market they've already staked in."""
-    return max(0.0, max_bet(clout) - already_staked)
+def can_afford(balance: float, amount: float) -> bool:
+    """Betting spends Clout immediately; you can bet any amount up to your balance."""
+    return 0 < amount <= balance + 1e-9
 
 
 def privileges(clout: float) -> list[str]:
@@ -108,9 +102,10 @@ def net_clout_change(trades: Iterable[tuple[int, float, float]], winning_outcome
 
 
 def smart_money(stakes: Iterable[tuple[float, int, float]], n_outcomes: int) -> list[float] | None:
-    """Smart Money line: Clout-weighted split of stakes, positive-Clout users only.
+    """Smart Money line: stakes weighted by each user's realized profit, profitable users only.
 
-    stakes: (user_clout, outcome_index, clout_staked). Weight = user_clout (only if > 0).
+    stakes: (weight, outcome_index, clout_staked). weight = realized profit (resolved winnings - resolved
+    spend); only users with weight > 0 count.
     Returns one probability per outcome (sums to 1), or None if no positive-Clout stake.
     """
     w = [0.0] * n_outcomes

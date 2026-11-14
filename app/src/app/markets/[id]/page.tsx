@@ -7,9 +7,10 @@ import { CommentBox } from "@/components/comment-box";
 import { PriceChart } from "@/components/price-chart";
 import { OutcomeRows, PickProvider } from "@/components/trade-context";
 import { CourseIcon, fmtClout } from "@/components/ui";
-import { maxBet } from "@/core/clout";
 import { getInsight } from "@/server/analyst";
 import { getComments, getMarket, priceHistory, smartMoney, userStake } from "@/server/markets";
+import { DeleteCommentButton } from "@/components/comment-box";
+import Link from "next/link";
 import { currentUser } from "@/server/user";
 
 export default function MarketPage({ params, searchParams }: PageProps<"/markets/[id]">) {
@@ -30,8 +31,7 @@ async function Market({
   const [{ id }, sp] = await Promise.all([params, searchParams]);
   const [market, user] = await Promise.all([getMarket(id), currentUser()]);
   if (!market) notFound();
-  const staked = await userStake(user.user_id, id);
-  const limit = maxBet(user.clout);
+  const staked = user ? await userStake(user.user_id, id) : 0;
   const binary = market.market_type === "binary" && market.outcomes.length === 2;
   const pick = Math.min(Math.max(0, Number(sp.pick ?? 0) || 0), market.outcomes.length - 1);
   const outcomes = market.outcomes.map((o) => ({ index: o.outcome_index, label: o.label, price: o.price }));
@@ -69,7 +69,7 @@ async function Market({
           </Suspense>
 
           <Suspense fallback={<p className="text-sm text-muted">Loading comments…</p>}>
-            <Comments id={id} />
+            <Comments id={id} me={user?.user_id ?? null} />
           </Suspense>
         </div>
 
@@ -81,13 +81,19 @@ async function Market({
             outcomes={outcomes}
             liquidityB={market.liquidity_b}
             qShares={market.outcomes.map((o) => o.q_shares)}
-            remaining={Math.max(0, limit - staked)}
-            limit={limit}
+            available={user ? Math.max(0, user.clout) : null}
           />
-          <div className="rounded-2xl border border-line bg-panel p-4 text-sm">
-            <div className="flex justify-between"><span className="text-muted">Your Clout</span><Clout value={user.clout} /></div>
-            <div className="mt-1 flex justify-between"><span className="text-muted">Staked here</span><span className="tabular">{staked.toFixed(1)}</span></div>
-          </div>
+          {user ? (
+            <div className="rounded-2xl border border-line bg-panel p-4 text-sm">
+              <div className="flex justify-between"><span className="text-muted">Your Clout</span><Clout value={user.clout + user.open_stake} /></div>
+              <div className="mt-1 flex justify-between"><span className="text-muted">Available to bet</span><span className="tabular">{user.clout.toFixed(1)}</span></div>
+              <div className="mt-1 flex justify-between"><span className="text-muted">Staked in this market</span><span className="tabular">{staked.toFixed(1)}</span></div>
+            </div>
+          ) : (
+            <p className="rounded-2xl border border-line bg-panel p-4 text-sm text-muted">
+              <Link href="/login" className="font-semibold text-accent">Sign in</Link> with your @wisc.edu email to bet. You start with 100 Clout.
+            </p>
+          )}
         </aside>
       </div>
     </PickProvider>
@@ -118,12 +124,12 @@ async function Analyst({ id }: { id: string }) {
   return <AskAnalyst marketId={id} insight={insight} />;
 }
 
-async function Comments({ id }: { id: string }) {
+async function Comments({ id, me }: { id: string; me: string | null }) {
   const comments = await getComments(id);
   return (
     <section className="rounded-2xl border border-line bg-panel p-4">
       <h2 className="font-semibold">Comments <span className="text-sm font-normal text-muted">{comments.length}</span></h2>
-      <CommentBox marketId={id} />
+      {me ? <CommentBox marketId={id} /> : <p className="mt-2 text-sm text-muted"><Link href="/login" className="text-accent">Sign in</Link> to comment.</p>}
       <ul className="mt-3 divide-y divide-line">
         {comments.map((c) => (
           <li key={c.comment_id} className="py-2.5 text-sm">
@@ -131,6 +137,7 @@ async function Comments({ id }: { id: string }) {
               <span className="font-semibold">@{c.handle}</span>
               <Clout value={c.clout} className="text-xs" />
               <span className="text-muted">{new Date(c.created_at).toLocaleDateString()}</span>
+              {me === c.user_id && <DeleteCommentButton commentId={c.comment_id} />}
             </div>
             <p className="mt-0.5">{c.body}</p>
           </li>

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../lib/test-vectors.json";
 import { applyTrade, cost, costToBuy, prices, sharesForAmount } from "./lmsr";
-import { maxBet, netCloutChange, privileges, remainingBet, smartMoney } from "./clout";
+import { STARTING_CLOUT, canAfford, netCloutChange, privileges, smartMoney } from "./clout";
 import { brier, calibrationCurve, meanBrier } from "./scoring";
 
 const TOL = vectors.tolerance;
@@ -21,8 +21,8 @@ describe("shared vectors (must match databricks/lib/clout.py)", () => {
   });
 
   it("Clout rules", () => {
-    for (const v of vectors.max_bet) expect(maxBet(v.clout)).toBe(v.max_bet);
-    for (const v of vectors.remaining_bet) expect(remainingBet(v.clout, v.staked)).toBe(v.remaining);
+    expect(STARTING_CLOUT).toBe(vectors.starting_clout);
+    for (const v of vectors.can_afford) expect(canAfford(v.balance, v.amount)).toBe(v.ok);
     for (const v of vectors.privileges) expect(privileges(v.clout)).toEqual(v.privileges);
     for (const v of vectors.net_clout_change)
       close(netCloutChange(v.trades as [number, number, number][], v.winner), v.net);
@@ -55,5 +55,8 @@ describe("properties", () => {
     expect(d).toBeGreaterThan(0.005);
     expect(d).toBeLessThan(0.015);
   });
-  it("min bet is always 10, even deep negative", () => expect(maxBet(-10_000)).toBe(10));
+  it("cannot bet more than your balance", () => {
+    expect(canAfford(100, 100)).toBe(true);
+    expect(canAfford(100, 101)).toBe(false);
+  });
 });

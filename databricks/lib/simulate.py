@@ -167,7 +167,8 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
     m_by_id = {m["market_id"]: m for m in markets}
     q_state = {m["market_id"]: [0.0] * len(m["_true_p"]) for m in markets}
     staked = {}               # (user, market) -> clout staked
-    clout_now = {u["user_id"]: 0.0 for u in users}
+    clout_now = {u["user_id"]: c.STARTING_CLOUT for u in users}   # balance: bets spend, payouts credit
+    profit = {u["user_id"]: 0.0 for u in users}                     # realized profit from resolved markets
     trades_by_market = {m["market_id"]: [] for m in markets}
     trades = []
 
@@ -195,12 +196,14 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
         new_q, sh, _ = c.apply_trade(q, outcome, amount, m_by_id[mid]["liquidity_b"])
         q_state[mid] = new_q
         staked[(user_id, mid)] = staked.get((user_id, mid), 0.0) + amount
+        balance_before = clout_now[user_id]
+        clout_now[user_id] -= amount
         tid += 1
         row = {"trade_id": f"t-sim-{tid:06d}", "market_id": mid, "user_id": user_id, "outcome_index": outcome,
                "clout_spent": round(amount, 4), "shares": sh,
                "price_before": c.prices(q, m_by_id[mid]["liquidity_b"])[outcome],
                "prices_after": c.prices(new_q, m_by_id[mid]["liquidity_b"]),
-               "user_clout_at_trade": clout_now[user_id], "created_at": t}
+               "user_clout_at_trade": balance_before, "created_at": t}
         row["post_price"] = row["prices_after"][outcome]
         trades.append(row)
         trades_by_market[mid].append(row)
@@ -226,32 +229,35 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
             for tr in trades_by_market[mid]:
                 per_user.setdefault(tr["user_id"], []).append((tr["outcome_index"], tr["clout_spent"], tr["shares"]))
             for uid, trs in per_user.items():
-                clout_now[uid] += c.net_clout_change(trs, winner)
-            resolver = max(clout_now, key=clout_now.get)
+                clout_now[uid] += c.payout({o: sum(sh for oo, _, sh in trs if oo == o) for o, _, _ in trs}, winner)
+                profit[uid] += c.net_clout_change(trs, winner)
+            resolver = max(profit, key=profit.get)
             resolutions.append({"market_id": mid, "winning_outcome_index": winner, "resolved_by": resolver,
                                 "rationale": "Simulated resolution from the listed source.",
                                 "resolved_at": t, "dispute_deadline": t + timedelta(hours=24),
                                 "final_at": t + timedelta(hours=24), "status": "final"})
             continue
         uid = rng.choices(users, activity)[0]["user_id"]
-        room = c.remaining_bet(clout_now[uid], staked.get((uid, mid), 0.0))
-        if room < 1:
+        balance = clout_now[uid]
+        if balance < 1:
             continue
         p_now = c.prices(q_state[mid], m["liquidity_b"])
         outcome = decide(uid, m, p_now)
-        amount = min(room, c.MIN_BET * rng.uniform(0.5, 1.0) if room <= c.MIN_BET else rng.uniform(c.MIN_BET * 0.5, room))
-        place(t, uid, mid, outcome, round(max(1.0, amount), 2))
+        size = rng.uniform(5, 25) if arch_of[uid] == "good" else rng.uniform(2, 15)
+        amount = round(min(balance, size), 2)
+        if c.can_afford(balance, amount):
+            place(t, uid, mid, outcome, amount)
 
     # -------------------------------------------------------------- demo market: 35% crowd, ~60% smart money
     demo = m_by_id[DEMO_MARKET_ID]
     t0, t1 = demo["opens_at"], NOW - timedelta(hours=1)
-    smart = sorted([u for u in users if clout_now[u["user_id"]] > 0], key=lambda u: -clout_now[u["user_id"]])
-    crowd = [u for u in users if clout_now[u["user_id"]] <= 0]
+    smart = sorted([u for u in users if profit[u["user_id"]] > 0], key=lambda u: -profit[u["user_id"]])
+    crowd = [u for u in users if profit[u["user_id"]] <= 0]
     n_demo = 0
     ts = lambda k, n: t0 + (t1 - t0) * (k / n)  # noqa: E731
 
     def demo_smart():
-        st = [(clout_now[tr["user_id"]], tr["outcome_index"], tr["clout_spent"]) for tr in trades_by_market[DEMO_MARKET_ID]]
+        st = [(profit[tr["user_id"]], tr["outcome_index"], tr["clout_spent"]) for tr in trades_by_market[DEMO_MARKET_ID]]
         return c.smart_money(st, 2)
 
     # interleave: smart users mostly YES, crowd mostly NO; stop when both targets are hit
@@ -271,10 +277,10 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
             ci += 1
             outcome = 1 if p_yes > 0.35 else 0
         uid = u["user_id"]
-        room = c.remaining_bet(clout_now[uid], staked.get((uid, DEMO_MARKET_ID), 0.0))
-        if room < 1:
+        amount = round(min(clout_now[uid], rng.uniform(5, 10)), 2)
+        if not c.can_afford(clout_now[uid], amount) or amount < 1:
             continue
-        place(ts(step, 1500), uid, DEMO_MARKET_ID, outcome, round(min(room, rng.uniform(5, 10)), 2))
+        place(ts(step, 1500), uid, DEMO_MARKET_ID, outcome, amount)
         n_demo += 1
     # spread the demo trades evenly over the market's life so the chart fills the whole window
     demo_trades = sorted(trades_by_market[DEMO_MARKET_ID], key=lambda r: r["created_at"])
@@ -285,7 +291,7 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
     # -------------------------------------------------------------- finish rows
     for u in users:
         u["clout"] = round(clout_now[u["user_id"]], 4)
-    by_clout = sorted(users, key=lambda u: -u["clout"])
+    by_clout = sorted(users, key=lambda u: -profit[u["user_id"]])
     for k, m in enumerate(markets):
         m["creator_id"] = by_clout[k % 40]["user_id"]
     for o in outcomes:
@@ -328,11 +334,16 @@ if __name__ == "__main__":
     out = simulate()
     print({k: len(v) for k, v in out.items()}, f"{time.time() - t:.1f}s")
     cl = sorted(u["clout"] for u in out["users_raw"])
-    print("clout min/median/max", cl[0], cl[len(cl) // 2], cl[-1], "negative:", sum(x < 0 for x in cl))
+    print("clout min/median/max", round(cl[0], 1), round(cl[len(cl) // 2], 1), round(cl[-1], 1), "negative:", sum(x < 0 for x in cl))
     demo_q = [o["q_shares"] for o in out["outcomes_raw"] if o["market_id"] == DEMO_MARKET_ID]
     print("demo crowd yes", round(c.prices(demo_q)[0], 3))
-    clout_of = {u["user_id"]: u["clout"] for u in out["users_raw"]}
-    st = [(clout_of[t["user_id"]], t["outcome_index"], t["clout_spent"]) for t in out["trades_raw"] if t["market_id"] == DEMO_MARKET_ID]
+    winner = {r["market_id"]: r["winning_outcome_index"] for r in out["resolutions_raw"]}
+    prof = {}
+    for t in out["trades_raw"]:
+        if t["market_id"] in winner:
+            won = t["shares"] if t["outcome_index"] == winner[t["market_id"]] else 0.0
+            prof[t["user_id"]] = prof.get(t["user_id"], 0.0) + won - t["clout_spent"]
+    st = [(prof.get(t["user_id"], 0.0), t["outcome_index"], t["clout_spent"]) for t in out["trades_raw"] if t["market_id"] == DEMO_MARKET_ID]
     print("demo smart money yes", round(c.smart_money(st, 2)[0], 3), "demo trades", len(st))
     from collections import Counter
     print(Counter(u["archetype"] for u in sorted(out["users_raw"], key=lambda u: -u["clout"])[:100]))

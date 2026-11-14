@@ -38,7 +38,7 @@ NB_DIR = os.path.dirname(_nb if _nb.startswith("/Workspace") else "/Workspace" +
 schema_sql = open(os.path.join(os.path.dirname(os.path.dirname(NB_DIR)), "db", "schema.sql")).read()
 with conn.cursor() as cur:
     cur.execute(schema_sql)
-    cur.execute("TRUNCATE ai_questions, disputes, comments, resolutions, trades, outcomes, markets, users CASCADE")
+    cur.execute("TRUNCATE sessions, login_tokens, ai_questions, disputes, comments, resolutions, trades, outcomes, markets, users CASCADE")
 conn.commit()
 
 # COMMAND ----------

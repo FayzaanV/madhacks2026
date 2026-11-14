@@ -138,65 +138,42 @@
       "post_price": 0.42142592850755234
     }
   ],
-  "max_bet": [
+  "starting_clout": 100.0,
+  "can_afford": [
     {
-      "clout": -500,
-      "max_bet": 10.0
+      "balance": 100,
+      "amount": 30,
+      "ok": true
     },
     {
-      "clout": 0,
-      "max_bet": 10.0
+      "balance": 100,
+      "amount": 100,
+      "ok": true
     },
     {
-      "clout": 50,
-      "max_bet": 10.0
+      "balance": 100,
+      "amount": 100.01,
+      "ok": false
     },
     {
-      "clout": 100,
-      "max_bet": 10.0
+      "balance": 0,
+      "amount": 1,
+      "ok": false
     },
     {
-      "clout": 101,
-      "max_bet": 10.100000000000001
+      "balance": -5,
+      "amount": 1,
+      "ok": false
     },
     {
-      "clout": 250,
-      "max_bet": 25.0
+      "balance": 50,
+      "amount": 0,
+      "ok": false
     },
     {
-      "clout": 1000,
-      "max_bet": 100.0
-    },
-    {
-      "clout": 12345,
-      "max_bet": 1234.5
-    }
-  ],
-  "remaining_bet": [
-    {
-      "clout": 0,
-      "staked": 0,
-      "remaining": 10.0
-    },
-    {
-      "clout": 0,
-      "staked": 10,
-      "remaining": 0.0
-    },
-    {
-      "clout": 0,
-      "staked": 15,
-      "remaining": 0.0
-    },
-    {
-      "clout": 400,
-      "staked": 25,
-      "remaining": 15.0
-    },
-    {
-      "clout": -80,
-      "staked": 3,
-      "remaining": 7.0
+      "balance": 50,
+      "amount": -3,
+      "ok": false
     }
   ],
   "privileges": [

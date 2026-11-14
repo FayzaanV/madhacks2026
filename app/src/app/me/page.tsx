@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Profile } from "@/components/profile";
 import { currentUser } from "@/server/user";
@@ -12,5 +13,6 @@ export default function MePage() {
 
 async function Me() {
   const u = await currentUser();
-  return <Profile userId={u.user_id} handle={u.handle} liveClout={u.clout} />;
+  if (!u) redirect("/login");
+  return <Profile userId={u.user_id} handle={u.handle} liveClout={u.clout + u.open_stake} />;
 }
