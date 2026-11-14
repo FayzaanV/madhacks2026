@@ -1,4 +1,4 @@
-# Databricks Asset Bundle for The Curve.
+# Databricks Asset Bundle for Yomi.
 #   databricks bundle validate
 #   databricks bundle deploy -t dev     # your own copy of jobs/pipelines (prefixed with your name)
 #   databricks bundle deploy -t prod    # the shared copy the demo runs on; deploy from main only

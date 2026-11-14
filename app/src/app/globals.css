@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* The Curve theme: deep purple board, violet accent. Dark is the primary look. */
+/* Yomi theme: deep purple board, violet accent. Dark is the primary look. */
 :root {
   --bg: #f6f4fb;
   --panel: #ffffff;

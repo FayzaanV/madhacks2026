@@ -1,4 +1,4 @@
-# CLAUDE.md — The Curve
+# CLAUDE.md — Yomi
 
 > Single source of truth for every teammate and every Claude Code session. Read it before writing code.
 > If a decision changes, update this file in the same commit.
@@ -11,7 +11,7 @@
 
 The Databricks base and a first version of the website are built and deployed (on `main`):
 - **Data:** simulated campus in `the_curve.bronze`, Lakeflow pipeline producing silver/gold, Lakebase ledger seeded with the same data.
-- **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: purple board UI, markets, betting, AI analyst, comments, leaderboard, profiles.
+- **Website:** Next.js app in `/app`, deployed as the Databricks App **`yomi`**: purple board UI, markets, betting, AI analyst, comments, leaderboard, profiles.
 - **Accounts:** passwordless university email login (pick your school, verify an email at its domain); accounts, sign-in tokens, sessions and schools live in Lakebase. REST API under `/api` (see §4 "REST API").
 - **Multi-university:** students from any university can join. Leaderboards exist for every school plus a school-vs-school league, and everyone can view every school's board.
 - **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
@@ -20,7 +20,7 @@ The Databricks base and a first version of the website are built and deployed (o
 - **Workspace (Free Edition):** `https://dbc-9eafb64f-74c3.cloud.databricks.com`
 - All four teammates are workspace users and members of the workspace group **`the-curve-team`**. Musa is the workspace admin; ask him to add or remove people. This repo is public, so **don't put teammate emails, tokens, or other credentials in it.**
 - **Unity Catalog grants go to `account users`, not `the-curve-team`:** UC can only grant to account-level groups, and on Free Edition the account contains just this workspace's users (our team). `account users` has `ALL PRIVILEGES` on `the_curve` and `the_curve_ledger`.
-- In the workspace: SQL warehouse "Serverless Starter Warehouse" (`d3933f49c3b5beb3`), Lakebase project `the-curve-ledger`, Databricks App `the-curve`, Foundation Model endpoints (we use `databricks-meta-llama-3-3-70b-instruct`), Genie.
+- In the workspace: SQL warehouse "Serverless Starter Warehouse" (`d3933f49c3b5beb3`), Lakebase project `the-curve-ledger`, Databricks App `yomi`, Foundation Model endpoints (we use `databricks-meta-llama-3-3-70b-instruct`), Genie.
 
 **Get access (each teammate, once):**
 1. Accept the invite email and sign in at the workspace URL with the email you were invited with.
@@ -32,7 +32,8 @@ The Databricks base and a first version of the website are built and deployed (o
 
 ## 1. Project overview
 
-- **Name:** The Curve (working name). **Currency:** Clout.
+- **Name:** Yomi (renamed from "The Curve" on 2026-11-14). **Currency:** Clout.
+  - User-facing name, Databricks App (`yomi`, so the URL is `yomi-<workspace-id>.<region>.databricksapps.com`) and job/pipeline names say Yomi. Internal identifiers keep the old name on purpose, because renaming them would orphan existing data or deployments: catalog `the_curve`, Lakebase project `the-curve-ledger`, bundle name `the_curve`, cookie `curve_session`.
 - **One-liner:** "Bet your Clout, not your cash." A prediction market for college students where you stake your reputation, not money, on things students care about. Started at UW-Madison (the current markets are about UW), open to students from any university.
 - **Context:** 24-hour hackathon (MadHacks). We compete in the **Databricks track**, so Databricks is central to the product, not an add-on.
 - **Universities:** every user and market has a `school_id`. Listed schools (name, short name, email domain, color) are in `app/src/core/universities.json`, which is shared by the app and the simulation. Students from unlisted schools sign up with any `.edu` email and get `school_id = edu-<domain>`. Next: per-school market spaces.
@@ -122,7 +123,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | **SQL warehouse** | App reads gold via the Statement Execution API. | `app/src/server/warehouse.ts` |
 | **Foundation Model APIs + `ai_query`** | AI market analyst (batch in SQL, live chat from the app). | `30_ai_analyst_batch.py`, `app/src/server/analyst.ts` |
 | **MLflow** | Traces for every batch analyst call. Models (market accuracy, waitlist odds) still to do. | `30_ai_analyst_batch.py` |
-| **Databricks Apps** | Hosts the Next.js site as `the-curve`, with the warehouse, model endpoint and Lakebase attached as app resources. | `resources/app.yml`, `app/app.yaml` |
+| **Databricks Apps** | Hosts the Next.js site as `yomi`, with the warehouse, model endpoint and Lakebase attached as app resources. | `resources/app.yml`, `app/app.yaml` |
 | **Git folders** | Teammates edit notebooks in the workspace, synced to this GitHub repo. | see "Connecting GitHub" below |
 
 ### Architecture split
@@ -140,7 +141,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 - **Demo mode is opt-in.** Showing the link on screen lets anyone sign in as anyone, so it only happens when there's no `RESEND_API_KEY` **and** `DEMO_LOGIN=1` is set (or you're running `next dev` locally). A production server with neither returns 503 "Email sign-in isn't set up". Never set `DEMO_LOGIN=1` on a public deployment; on the Databricks App it's tolerable only because Databricks sign-in already limits access to workspace members.
 - `/login/verify` needs a click (POST to `/api/auth/verify`) so email link scanners can't use up the token. Verifying creates the user if new (100 Clout) and a session: random id in an `httpOnly`, `Secure`, `SameSite=Lax` cookie `curve_session`; only its SHA-256 is stored in `sessions` (30 days).
 - **Usernames:** new accounts get a random placeholder (`brave_wolf6383`), never derived from the email, so school IDs aren't exposed. After the first sign-in the app sends you to `/welcome` to pick one; change it later on `/me`. Rules: 3–20 chars `[a-z0-9_]`, case-insensitively unique across everyone (simulated users included), reserved names blocked (`setHandle` in `app/src/server/auth.ts`, `PATCH /api/me`).
-- No passwords anywhere. Sign-in links only point at `APP_ORIGIN`, localhost, or `the-curve-*.databricksapps.com` (forged Host headers are rejected).
+- No passwords anywhere. Sign-in links only point at `APP_ORIGIN`, localhost, or `yomi-*.databricksapps.com` (forged Host headers are rejected).
 - `sessions` sync to `bronze.sessions_raw` without the hash or email; `login_tokens` never leave Lakebase. Code: `app/src/server/auth.ts`.
 - **Resend key:** create it at resend.com, then `databricks secrets create-scope the-curve` (once) and `databricks secrets put-secret the-curve resend_api_key`. Add a `secret` app resource for it in `resources/app.yml` and `RESEND_API_KEY` `valueFrom` in `app/app.yaml`. Locally put it in `app/.env.local`. Until a domain is verified in Resend, it only delivers to the Resend account owner's own address; set `RESEND_FROM` once a domain is verified.
 
@@ -168,10 +169,10 @@ python3 scripts/dbsql.py "SELECT * FROM the_curve.gold.leaderboard LIMIT 5"   # 
 node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"                # SQL on Lakebase
 databricks bundle run -t dev simulate_and_build                              # rebuild sim data (TRUNCATES the ledger)
 databricks bundle run -t dev refresh                                         # sync + pipeline + AI insights
-databricks bundle run -t dev the_curve                                       # deploy the app
+databricks bundle run -t dev yomi                                             # deploy the app
 cd app && npm run dev                                                        # local app (uses your CLI login)
 ```
-After the app is (re)created, grant its service principal access: `node app/scripts/ledger-sql.mjs grant-app <client-id>` and `GRANT USE CATALOG, USE SCHEMA, SELECT ON CATALOG the_curve TO \`<client-id>\`` (client id from `databricks apps get the-curve`).
+After the app is (re)created, grant its service principal access: `node app/scripts/ledger-sql.mjs grant-app <client-id>` and `GRANT USE CATALOG, USE SCHEMA, SELECT ON CATALOG the_curve TO \`<client-id>\`` (client id from `databricks apps get yomi`).
 
 ### Data flow
 ```

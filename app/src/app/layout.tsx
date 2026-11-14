@@ -7,7 +7,7 @@ import { UserChip } from "@/components/user-chip";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "The Curve",
+  title: "Yomi",
   description: "Bet your Clout, not your cash. A prediction market for college students, with leaderboards for every university.",
 };
 
@@ -18,7 +18,7 @@ function Logo() {
         <rect x="1" y="1" width="22" height="22" rx="6" fill="currentColor" />
         <path d="M5 17 C9 17 9 7 13 7 S17 12 19 9" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
       </svg>
-      <span className="text-lg">The Curve</span>
+      <span className="text-lg">Yomi</span>
     </Link>
   );
 }

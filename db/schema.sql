@@ -1,4 +1,4 @@
--- The Curve trade ledger (Lakebase Postgres, database databricks_postgres, schema public).
+-- Yomi trade ledger (Lakebase Postgres, database databricks_postgres, schema public).
 -- Columns mirror the_curve.bronze.*_raw so 10_sync_bronze can copy them 1:1.
 -- Apply: databricks/notebooks/02_seed_lakebase.py runs this file before seeding.
 

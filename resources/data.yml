@@ -1,7 +1,7 @@
 resources:
   pipelines:
     medallion:
-      name: the-curve-medallion
+      name: yomi-medallion
       catalog: ${var.catalog}
       schema: silver
       serverless: true
@@ -15,7 +15,7 @@ resources:
 
   jobs:
     simulate_and_build:
-      name: the-curve-simulate-and-build
+      name: yomi-simulate-and-build
       description: Regenerate simulated bronze data, then refresh silver/gold.
       tasks:
         - task_key: simulate
@@ -39,7 +39,7 @@ resources:
             full_refresh: true
 
     refresh:
-      name: the-curve-refresh
+      name: yomi-refresh
       description: Lakebase ledger -> bronze, refresh silver/gold, then regenerate AI analyst insights.
       schedule:
         quartz_cron_expression: "0 0/15 * * * ?"

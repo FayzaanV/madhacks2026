@@ -1,4 +1,4 @@
-"""Simulated campus data for The Curve. Pure Python (stdlib + clout.py), deterministic by seed.
+"""Simulated campus data for Yomi. Pure Python (stdlib + clout.py), deterministic by seed.
 
 simulate() returns dict[table_name -> list[dict]] matching the bronze schemas:
 users_raw, markets_raw, outcomes_raw, trades_raw, resolutions_raw, comments_raw, disputes_raw.
