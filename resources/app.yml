@@ -22,4 +22,11 @@ resources:
           job:
             id: ${resources.jobs.refresh.id}
             permission: CAN_MANAGE_RUN
+        # Comma-separated Yomi sign-in emails allowed to create and resolve markets. Lives in a secret because
+        # this repo is public: `databricks secrets put-secret the-curve admin_emails`.
+        - name: admin-emails
+          secret:
+            scope: the-curve
+            key: admin_emails
+            permission: READ
       # Team access comes from the prod target's top-level permissions (users: CAN_MANAGE) in databricks.yml.

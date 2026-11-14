@@ -15,6 +15,9 @@ The Databricks base and a first version of the website are built and deployed (o
 - **Accounts:** passwordless university email login (pick your school, verify an email at its domain); accounts, sign-in tokens, sessions and schools live in Lakebase. REST API under `/api` (see §4 "REST API").
 - **Multi-university:** students from any university can join. Leaderboards exist for every school plus a school-vs-school league, and everyone can view every school's board.
 - **Resolution:** `POST /api/markets/:id/resolve` (500+ Clout, or an `ADMIN_EMAILS` account) pays 1 Clout per winning share into `users.clout` (or refunds every stake if voided), opens a 24h dispute window, and starts `yomi-refresh` so gold catches up in minutes. A resolve panel shows on the market page for eligible users.
+- **Admins:** accounts in `ADMIN_EMAILS` can create markets (`/markets/new`, "+ New market" in the header; `POST /api/markets`) and resolve any market. Trading stops at `closes_at` ("awaiting resolution"); resolved/voided markets show a banner.
+- **Whole Clout:** buys are whole Clout; sells ask for whole Clout to receive (exact shares via `sharesForProceeds`) or "Sell all" (the only fractional proceeds). Clout displays as whole numbers; the ledger keeps exact values.
+- **Real vs simulated:** simulated demo users carry a "sim" badge everywhere bettors/commenters show; Activity and Top holders have a "Real people only" toggle. Comments scroll and page 50 at a time (`?before=` cursor), so none drop off.
 - **Selling + portfolio:** sell shares back to the LMSR any time before resolution (Buy/Sell toggle). Market pages have a live odds chart (Lakebase, every trade) with range buttons and a scrub slider, Smart Money dashed (gold), a "Your position" card, and Activity / Top holders tabs showing everyone's bets by @username. `/portfolio`: positions, P&L, trade history, Clout-over-time chart (gold `user_clout_history`).
 - **Profiles:** uploaded profile pictures (128px, in Lakebase, never synced to bronze) with an initials fallback; a title you pick from earned titles (Clout tiers in `core/titles.ts` + gold flair), shown in the header, comments and bets.
 - **Not built yet:** market proposal/upvotes, disputes (an overturn would have to reverse the payouts), Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
@@ -163,9 +166,10 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | GET | `/api/users/:id/avatar` | – | profile picture (cache forever; URLs carry `?v=`) |
 | DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
 | GET | `/api/markets?q=&status=` | – | markets with live prices |
+| POST | `/api/markets` | ✓ admin | `{question, course, market_type: "binary"\|"multiple_choice", outcomes?, closes_at, resolution_source?, liquidity_b?, not_about_a_student: true}` → `{marketId}` |
 | GET | `/api/markets/:id` | – | market, Smart Money, AI insight |
-| POST | `/api/markets/:id/trade` | ✓ | buy `{outcome, amount}` → spends Clout · sell `{side:"sell", outcome, shares}` → proceeds to balance |
-| GET / POST | `/api/markets/:id/comments` | – / ✓ | list / add |
+| POST | `/api/markets/:id/trade` | ✓ | buy `{outcome, amount}` (whole Clout) · sell `{side:"sell", outcome, clout}` (whole Clout to receive) or `{side:"sell", outcome, all:true}`; 400 after `closes_at` |
+| GET / POST | `/api/markets/:id/comments?before=` | – / ✓ | `{comments, next, total}`, 50 per page newest first / add |
 | DELETE | `/api/comments/:id` | ✓ | delete your own comment |
 | POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text), 10/hour |
 | POST | `/api/markets/:id/resolve` | ✓ 500+ | `{outcome \| "void", rationale}` → pays out, starts refresh |
@@ -246,7 +250,7 @@ DATABRICKS_CATALOG=the_curve
 DATABASE_URL=                   # Lakebase or Supabase Postgres
 AUTH_SECRET=
 ```
-Optional: `ADMIN_EMAILS` (comma-separated) lets those accounts resolve markets without 500 Clout, for demos. Set it in `app/.env.local` or as an app env var, **never in the repo** (it's public). `REFRESH_JOB_ID` comes from the app's `refresh-job` resource; locally the job is found by name.
+`ADMIN_EMAILS` (comma-separated Yomi sign-in emails) lets those accounts create markets and resolve without 500 Clout. On the app it comes from the secret `the-curve/admin_emails` (app resource `admin-emails`); update it with `databricks secrets put-secret the-curve admin_emails --string-value "a@wisc.edu,b@wisc.edu"` then `databricks bundle run yomi`. Locally put it in `app/.env.local`. **Never in the repo** (it's public). `REFRESH_JOB_ID` comes from the app's `refresh-job` resource; locally the job is found by name.
 
 Gold reads (`querySql`) are cached for 30 s per query and cleared on resolution.
 
@@ -297,7 +301,7 @@ For outcomes `i` with outstanding shares `q_i` and liquidity `b`:
 - Max market-maker loss = `b * ln(N)`; pick `b` so a 10-Clout bet moves price by ~1 point.
 
 ### Clout balance
-- `STARTING_CLOUT = 100`. `canAfford(balance, amount)` = `0 < amount <= balance`. A bet deducts `amount` from `users.clout` in the same Lakebase transaction that records the trade (`app/src/server/markets.ts` `placeBuy`).
+- `STARTING_CLOUT = 100`. `canAfford(balance, amount)` = `0 < amount <= balance`. Trades are whole Clout: `placeBuy` needs an integer `amount >= 1`; `placeSell` needs an integer `clout >= 1` (shares = `sharesForProceeds(q,i,a) = −b·ln(1 − (S/E_i)(1 − e^(−a/b)))`, the inverse of `sellProceeds`) or `"all"`. A bet deducts `amount` from `users.clout` in the same Lakebase transaction that records the trade (`app/src/server/markets.ts` `placeBuy`).
 - **Selling (signed trades).** `placeSell` sells `k` shares back at the LMSR price: `sellProceeds(q,i,k) = C(q) − C(q − k·e_i)` (`applySell` in `lmsr.ts`/`clout.py`). Trades are signed: a sell has `shares = −k`, `clout_spent = −proceeds`, and `basis_change = −sellBasis(basis, position, k)` (average cost). Position = `Σ shares`; open stake (cost basis still held) = `Σ basis_change` (`openStakeSql` in `ledger.ts`, used everywhere); realized on a sell = proceeds − average cost removed. Can't sell more than you hold.
 - Trades lock the market row `FOR SHARE`, then the user, then the outcomes; `resolveMarket` takes the market `FOR UPDATE`, so no trade lands mid-resolution.
 - Gold: `user_clout.clout = 100 + realized_profit`, `available = clout - open_stake`. realized = resolved markets `Σ(won·shares − clout_spent)` + open markets `Σ(basis_change − clout_spent)` (profit taken by selling); voided markets count nothing.
