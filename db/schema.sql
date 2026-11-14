@@ -153,3 +153,9 @@ ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS school_id text;
 -- Handles are unique case-insensitively among real users (simulated handles are checked in app code).
 ALTER TABLE users ADD COLUMN IF NOT EXISTS handle_chosen_at timestamptz;
 CREATE UNIQUE INDEX IF NOT EXISTS users_handle_real_uidx ON users (lower(handle)) WHERE NOT is_simulated;
+
+-- ------------------------------------------------------------------ sign-in abuse limits
+-- SHA-256 of the requester IP, for per-IP rate limits (raw IPs are never stored).
+ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS ip_hash text;
+CREATE INDEX IF NOT EXISTS login_tokens_ip_idx ON login_tokens (ip_hash, created_at);
+CREATE INDEX IF NOT EXISTS login_tokens_created_idx ON login_tokens (created_at);

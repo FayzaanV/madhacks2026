@@ -15,7 +15,15 @@ import { q, tx } from "./ledger";
 export const SESSION_COOKIE = "curve_session";
 const TOKEN_TTL_MIN = 15;
 const SESSION_DAYS = 30;
-const MAX_LINKS_PER_WINDOW = 3;
+const MAX_LINKS_PER_EMAIL = 3; // per 15 minutes
+const MAX_LINKS_PER_IP = 10; // per hour, so one visitor can't email thousands of addresses
+const MAX_LINKS_GLOBAL = 300; // per hour, protects the email quota if many IPs are used
+
+/**
+ * Demo mode shows the sign-in link on screen instead of emailing it, which means anyone could sign in as anyone.
+ * It is OFF unless explicitly enabled: DEMO_LOGIN=1, or local `next dev`. Production without an email key refuses.
+ */
+export const demoLoginEnabled = () => process.env.DEMO_LOGIN === "1" || process.env.NODE_ENV === "development";
 
 export class AuthError extends Error {
   constructor(message: string, public status = 400) {
@@ -45,25 +53,49 @@ export function checkEmail(rawEmail: unknown, rawSchool: unknown) {
   return { email, school: r.school };
 }
 
-/** Create a one-time sign-in link and email it (or return it in demo mode). */
+/**
+ * Requester IP, hashed before storage. Uses the LAST x-forwarded-for entry: that's the one our proxy (Databricks Apps)
+ * appends; earlier entries come from the client and can be faked to dodge the limit.
+ */
+async function requestIpHash(): Promise<string> {
+  const h = await headers();
+  const ip = (h.get("x-forwarded-for")?.split(",").pop() ?? h.get("x-real-ip") ?? "unknown").trim();
+  return sha256(`ip:${ip}`);
+}
+
+/** Create a one-time sign-in link and email it (or return it in demo mode, if enabled). */
 export async function requestLogin(rawEmail: unknown, rawSchool: unknown, origin: string): Promise<{ sent: boolean; devLink?: string }> {
   const { email, school } = checkEmail(rawEmail, rawSchool);
-  const recent = await q<{ n: number }>(
-    `SELECT count(*)::int AS n FROM login_tokens WHERE email = $1 AND created_at > now() - interval '${TOKEN_TTL_MIN} minutes'`,
-    [email],
-  );
-  if ((recent[0]?.n ?? 0) >= MAX_LINKS_PER_WINDOW)
-    throw new AuthError("Too many sign-in links requested. Wait a few minutes and try again.", 429);
+  const key = process.env.RESEND_API_KEY;
+  const demo = !key && demoLoginEnabled();
+  if (!key && !demo) throw new AuthError("Email sign-in isn't set up on this server yet. Ask the team to add the email key.", 503);
+
+  const ipHash = await requestIpHash();
+  const counts = (
+    await q<{ by_email: number; by_ip: number; total: number }>(
+      `SELECT count(*) FILTER (WHERE email = $1 AND created_at > now() - interval '${TOKEN_TTL_MIN} minutes')::int AS by_email,
+              count(*) FILTER (WHERE ip_hash = $2 AND created_at > now() - interval '1 hour')::int AS by_ip,
+              count(*) FILTER (WHERE created_at > now() - interval '1 hour')::int AS total
+       FROM login_tokens WHERE created_at > now() - interval '1 hour'`,
+      [email, ipHash],
+    )
+  )[0];
+  if (counts.by_email >= MAX_LINKS_PER_EMAIL)
+    throw new AuthError("Too many sign-in links for this email. Wait a few minutes and try again.", 429);
+  if (counts.by_ip >= MAX_LINKS_PER_IP)
+    throw new AuthError("Too many sign-in requests from your network. Try again in an hour.", 429);
+  if (counts.total >= MAX_LINKS_GLOBAL)
+    throw new AuthError("Sign-in is busy right now. Try again shortly.", 429);
 
   const token = randomToken();
   await q(
-    `INSERT INTO login_tokens (token_hash, email, school_id, expires_at) VALUES ($1, $2, $3, now() + interval '${TOKEN_TTL_MIN} minutes')`,
-    [sha256(token), email, school.school_id],
+    `INSERT INTO login_tokens (token_hash, email, school_id, ip_hash, expires_at)
+     VALUES ($1, $2, $3, $4, now() + interval '${TOKEN_TTL_MIN} minutes')`,
+    [sha256(token), email, school.school_id, ipHash],
   );
   const link = `${origin}/login/verify?token=${token}`;
 
-  const key = process.env.RESEND_API_KEY;
-  if (!key) return { sent: false, devLink: link }; // demo mode: no email service configured
+  if (demo) return { sent: false, devLink: link }; // explicit demo mode only
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
