@@ -1,7 +1,7 @@
 # Databricks Asset Bundle for Yomi.
 #   databricks bundle validate
-#   databricks bundle deploy -t dev     # your own copy of jobs/pipelines (prefixed with your name)
-#   databricks bundle deploy -t prod    # the shared copy the demo runs on; deploy from main only
+#   databricks bundle deploy            # = -t prod: the shared team deployment (deploy from an up-to-date main)
+#   databricks bundle run yomi          # rebuild + restart the website after app code changes
 bundle:
   name: the_curve
 
@@ -26,11 +26,14 @@ workspace:
   host: https://dbc-9eafb64f-74c3.cloud.databricks.com
 
 targets:
+  # dev = a personal sandbox (names prefixed with your user). It CANNOT include the yomi app or the shared
+  # pipeline tables while prod exists (same names), so use it only for experiments on jobs/notebooks.
   dev:
     mode: development
-    default: true
+  # prod = the ONE shared team deployment. Everyone deploys here from main: `databricks bundle deploy`.
   prod:
     mode: production
+    default: true
     workspace:
       root_path: /Workspace/Shared/.bundle/${bundle.name}/${bundle.target}
     permissions:

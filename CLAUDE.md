@@ -117,7 +117,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 ### Databricks products we use (and how)
 | Product | Our use | Where |
 |---|---|---|
-| **Asset Bundles** | All jobs, the pipeline and the app are code. `databricks bundle deploy -t dev` (your own copy, prefixed with your name) or `-t prod` (shared, deploy from `main` only). | `databricks.yml`, `resources/*.yml` |
+| **Asset Bundles** | All jobs, the pipeline and the app are code. **One shared deployment:** `databricks bundle deploy` (target `prod`, the default) from an up-to-date `main`. | `databricks.yml`, `resources/*.yml` |
 | **Unity Catalog** | Catalog `the_curve` (bronze/silver/gold/ml/ai) + `the_curve_ledger` (the Lakebase DB, readable from Spark/SQL). | `databricks/sql/00_setup_catalog.sql` |
 | **Lakebase** (Postgres) | Live trade ledger. Project `the-curve-ledger`, branch `production`, DB `databricks_postgres`. Auth = short-lived OAuth credential, no passwords. | `db/schema.sql`, `app/src/server/ledger.ts` |
 | **Lakeflow Jobs** (serverless) | `simulate_and_build` (sim → seed Lakebase → pipeline) and `refresh` (every 15 min **and** after each resolution, runs queued: Lakebase → bronze → pipeline → AI analyst). The sync MERGEs only new rows of append-only `trades` / `ai_questions` (1h overlap); small mutable tables are snapshotted; widget `full_refresh=true` rewrites everything. | `resources/data.yml` |
@@ -136,7 +136,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 ### Connecting GitHub (each teammate, once)
 1. Workspace → avatar → **Settings → Linked accounts → Git integration → GitHub → Link**, and authorize the Databricks GitHub App for `FayzaanV/madhacks2026`.
 2. **Workspace → Create → Git folder** → `https://github.com/FayzaanV/madhacks2026`. Pull, branch, and commit from the workspace.
-3. Deploy with the CLI from a laptop or the Git folder: `databricks bundle deploy -t dev`.
+3. Deploy with the CLI from a laptop or the Git folder: `databricks bundle deploy` (shared `prod` target; see "Deploying (whole team)").
 
 ### Accounts and login (any university, passwordless)
 - `POST /api/auth/request {email, school_id}`: the email must be at the chosen school's domain (subdomains OK, e.g. `cs.wisc.edu`); `school_id: "other"` accepts any `.edu` and maps it to a listed school if the domain matches (`schoolForEmail` in `app/src/core/universities.ts`, with tests). Rate limits: 3 links per email per 15 min, 10 per IP per hour (SHA-256 of the proxy-appended last `x-forwarded-for` hop; raw IPs never stored), 300 per hour overall. Only the **SHA-256** of a random token is stored, in Lakebase `login_tokens` (15 min, single use). The link `/login/verify?token=…` is emailed via **Resend**. On verify the school is re-derived from the verified email and inserted into `schools` if new.
@@ -166,14 +166,23 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | POST | `/api/markets/:id/resolve` | ✓ 500+ | `{outcome \| "void", rationale}` → pays out, starts refresh |
 Errors are `{ "error": "…" }` with 400/401/403/404/429. Route handlers are thin wrappers over `app/src/server/*`.
 
+### Deploying (whole team)
+There is **one shared deployment** (bundle target `prod`, the default), at `/Workspace/Shared/.bundle/the_curve/prod`. The `users` group (everyone in the workspace) has CAN_MANAGE on its jobs, pipeline and the `yomi` app, plus CAN_MANAGE on the Lakebase project `the-curve-ledger`, so **any teammate can deploy**:
+1. `git pull` on `main` (never deploy a stale or unmerged branch: the last deploy wins for everyone).
+2. Once: `databricks auth login --host https://dbc-9eafb64f-74c3.cloud.databricks.com` (profile `DEFAULT`).
+3. `databricks bundle deploy` → updates jobs/pipeline/app config. If app code changed: `databricks bundle run yomi`.
+4. If `db/schema.sql` changed, apply the new statements to Lakebase (`node app/scripts/ledger-sql.mjs "<sql>"`) **before** deploying code that uses them. They're written to be idempotent.
+- Jobs run as whoever deployed last. `yomi-refresh` runs every 15 minutes.
+- Don't use `-t dev` for the app or pipeline: dev makes personal copies that collide with the shared `yomi` app name and the pipeline's tables.
+
 ### Running things
 ```
 python3 scripts/dbsql.py "SELECT * FROM the_curve.gold.leaderboard LIMIT 5"   # SQL on the warehouse
 node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"                # SQL on Lakebase
 node app/scripts/ledger-sql.mjs "$(cat db/schema.sql)"                      # apply schema changes (idempotent, keeps data)
-databricks bundle run -t dev simulate_and_build                              # rebuild sim data (TRUNCATES the ledger)
-databricks bundle run -t dev refresh                                         # sync + pipeline + AI insights
-databricks bundle run -t dev yomi                                             # deploy the app
+databricks bundle run simulate_and_build   # rebuild sim data — TRUNCATES the ledger (all accounts + bets). Team agreement only.
+databricks bundle run refresh              # sync + pipeline + AI insights (also runs every 15 min)
+databricks bundle run yomi                 # rebuild + restart the website
 cd app && npm run dev                                                        # local app (uses your CLI login)
 ```
 After the app is (re)created, grant its service principal access: `node app/scripts/ledger-sql.mjs grant-app <client-id>` and `GRANT USE CATALOG, USE SCHEMA, SELECT ON CATALOG the_curve TO \`<client-id>\`` (client id from `databricks apps get yomi`).

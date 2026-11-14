@@ -22,6 +22,4 @@ resources:
           job:
             id: ${resources.jobs.refresh.id}
             permission: CAN_MANAGE_RUN
-      permissions:
-        - group_name: users
-          level: CAN_USE
+      # Team access comes from the prod target's top-level permissions (users: CAN_MANAGE) in databricks.yml.

@@ -40,6 +40,10 @@ resources:
 
     refresh:
       name: yomi-refresh
+      # The app starts this job after each resolution; keep its service principal's run permission on redeploys.
+      permissions:
+        - level: CAN_MANAGE_RUN
+          service_principal_name: ${resources.apps.yomi.service_principal_client_id}
       description: Lakebase ledger -> bronze, refresh silver/gold, then regenerate AI analyst insights.
       # The app also starts this job right after each resolution; queue those runs instead of skipping them.
       queue:
