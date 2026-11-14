@@ -13,6 +13,18 @@ The repo is empty apart from `README.md`, `LICENSE` (MIT), and a GitHub **Python
 
 - `.gitignore` ignores `.env` but **not** `node_modules/`, `.next/`, or `.env.local`. Add these before the first `npm install`.
 
+### Databricks workspace and team access (set up 2026-11-14)
+- **Workspace (Free Edition):** `https://dbc-9eafb64f-74c3.cloud.databricks.com`
+- All four teammates are workspace users and members of the group **`the-curve-team`**. Musa is the workspace admin; ask him to add or remove people. This repo is public, so **don't put teammate emails, tokens, or other credentials in it.**
+- Grant access to the group, never to individual users. Once the `the_curve` catalog exists, `the-curve-team` gets `ALL PRIVILEGES` on it.
+- Already in the workspace: SQL warehouse "Serverless Starter Warehouse", Databricks Apps and Lakebase (both available, nothing created yet), built-in model serving endpoints for `ai_query` (e.g. `databricks-meta-llama-3-3-70b-instruct`), and Genie.
+
+**Get access (each teammate, once):**
+1. Accept the invite email and sign in at the workspace URL with the email you were invited with.
+2. Install the Databricks CLI: `brew install databricks/tap/databricks`. If Homebrew fails with "Command Line Tools are too outdated", download the `darwin_arm64` zip from the [CLI releases](https://github.com/databricks/cli/releases), unzip it, and put the `databricks` binary in `~/.local/bin` (make sure that folder is on your `PATH`).
+3. Log in: `databricks auth login --host https://dbc-9eafb64f-74c3.cloud.databricks.com`, then enter `DEFAULT` as the profile name and sign in in the browser.
+4. Check: `databricks current-user me` prints your user, and its groups include `the-curve-team`.
+
 ---
 
 ## 1. Project overview
