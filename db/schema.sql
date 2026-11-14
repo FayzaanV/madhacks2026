@@ -132,3 +132,24 @@ CREATE TABLE IF NOT EXISTS sessions (
   revoked_at   timestamptz
 );
 CREATE INDEX IF NOT EXISTS sessions_user_idx ON sessions (user_id);
+
+-- ------------------------------------------------------------------ universities
+-- Listed schools come from app/src/core/universities.json (seeded by 02_seed_lakebase); schools from
+-- "my school isn't listed" sign-ups are inserted on first verified login.
+CREATE TABLE IF NOT EXISTS schools (
+  school_id    text PRIMARY KEY,
+  name         text NOT NULL,
+  short_name   text NOT NULL,
+  domain       text UNIQUE NOT NULL,
+  color        text,
+  is_listed    boolean NOT NULL DEFAULT true,
+  is_simulated boolean NOT NULL DEFAULT false,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+ALTER TABLE login_tokens ADD COLUMN IF NOT EXISTS school_id text;
+
+-- ------------------------------------------------------------------ usernames
+-- Real users pick their own username (handle) after their first sign-in; until then they get a random one.
+-- Handles are unique case-insensitively among real users (simulated handles are checked in app code).
+ALTER TABLE users ADD COLUMN IF NOT EXISTS handle_chosen_at timestamptz;
+CREATE UNIQUE INDEX IF NOT EXISTS users_handle_real_uidx ON users (lower(handle)) WHERE NOT is_simulated;

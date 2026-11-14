@@ -44,13 +44,14 @@ SCHEMAS = {
                         ("resolved_at", TS), ("dispute_deadline", TS), ("final_at", TS), ("status", S)],
     "comments_raw": [("comment_id", S), ("market_id", S), ("user_id", S), ("body", S), ("created_at", TS)],
     "disputes_raw": [("dispute_id", S), ("market_id", S), ("user_id", S), ("reason", S), ("created_at", TS)],
+    "schools_raw": [("school_id", S), ("name", S), ("short_name", S), ("domain", S), ("color", S), ("is_listed", B)],
 }
 ingested_at = datetime.now(timezone.utc)
 
 for table, cols in SCHEMAS.items():
     fields = cols + [("is_simulated", B), ("source", S), ("ingested_at", TS)]
     schema = T.StructType([T.StructField(n, t, True) for n, t in fields])
-    data = [tuple(r.get(n) for n, _ in cols) + (True, "simulation", ingested_at) for r in rows[table]]
+    data = [tuple(r.get(n) for n, _ in cols) + (r.get("is_simulated", True), "simulation", ingested_at) for r in rows[table]]
     df = spark.createDataFrame(data, schema)
     (df.write.mode("overwrite").option("overwriteSchema", "true")
        .saveAsTable(f"{catalog}.bronze.{table}"))

@@ -2,8 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { OTHER_SCHOOL, UNIVERSITIES } from "@/core/universities";
+
+const SORTED = [...UNIVERSITIES].sort((a, b) => a.name.localeCompare(b.name));
 
 export function LoginForm() {
+  const [school, setSchool] = useState("");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -16,7 +20,7 @@ export function LoginForm() {
     const res = await fetch("/api/auth/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, school_id: school }),
     });
     const j = await res.json();
     setBusy(false);
@@ -48,13 +52,36 @@ export function LoginForm() {
 
   return (
     <form onSubmit={submit} className="mt-5 space-y-3">
+      <label className="block text-sm">
+        <span className="text-muted">Your university</span>
+        <select
+          required
+          value={school}
+          onChange={(e) => setSchool(e.target.value)}
+          className="mt-1 w-full rounded-xl border border-line bg-panel-2 px-3 py-3 outline-none focus:border-accent"
+        >
+          <option value="" disabled>
+            Select your university…
+          </option>
+          {SORTED.map((u) => (
+            <option key={u.school_id} value={u.school_id}>
+              {u.name}
+            </option>
+          ))}
+          <option value={OTHER_SCHOOL}>My school isn&apos;t listed (any .edu email)</option>
+        </select>
+      </label>
       <input
         type="email"
         required
         autoComplete="email"
         value={email}
         onChange={(e) => setEmail(e.target.value)}
-        placeholder="netid@wisc.edu"
+        placeholder={
+          school && school !== OTHER_SCHOOL
+            ? `you@${UNIVERSITIES.find((u) => u.school_id === school)?.domain}`
+            : "you@school.edu"
+        }
         className="w-full rounded-xl border border-line bg-panel-2 px-3 py-3 outline-none focus:border-accent"
       />
       <button disabled={busy} className="w-full rounded-xl bg-accent py-3 font-semibold text-accent-ink disabled:opacity-50">
@@ -84,7 +111,7 @@ export function VerifyButton({ token }: { token: string }) {
           const j = await res.json();
           setBusy(false);
           if (!res.ok) return setError(j.error);
-          router.replace("/");
+          router.replace(j.needsHandle ? "/welcome" : "/");
           router.refresh();
         }}
         className="w-full rounded-xl bg-accent py-3 font-semibold text-accent-ink disabled:opacity-50"

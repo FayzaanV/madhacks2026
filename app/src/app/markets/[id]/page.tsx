@@ -91,7 +91,7 @@ async function Market({
             </div>
           ) : (
             <p className="rounded-2xl border border-line bg-panel p-4 text-sm text-muted">
-              <Link href="/login" className="font-semibold text-accent">Sign in</Link> with your @wisc.edu email to bet. You start with 100 Clout.
+              <Link href="/login" className="font-semibold text-accent">Sign in</Link> with your university email to bet. You start with 100 Clout.
             </p>
           )}
         </aside>

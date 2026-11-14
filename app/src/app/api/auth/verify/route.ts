@@ -6,8 +6,8 @@ import { SESSION_COOKIE, sessionCookieOptions, verifyLogin } from "@/server/auth
 export async function POST(req: Request) {
   return handle(async () => {
     const { token } = await readJson<{ token: string }>(req);
-    const { sessionId, maxAge } = await verifyLogin(token, req.headers.get("user-agent"));
+    const { sessionId, maxAge, needsHandle } = await verifyLogin(token, req.headers.get("user-agent"));
     (await cookies()).set(SESSION_COOKIE, sessionId, sessionCookieOptions(maxAge));
-    return Response.json({ ok: true });
+    return Response.json({ ok: true, needsHandle });
   });
 }

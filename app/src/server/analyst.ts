@@ -4,7 +4,7 @@ import { getComments, getMarket, smartMoney } from "./markets";
 import { q } from "./ledger";
 import { querySql } from "./warehouse";
 
-export const SYSTEM_PROMPT = `You are The Curve's AI market analyst for a UW-Madison campus prediction market.
+export const SYSTEM_PROMPT = `You are The Curve's AI market analyst for a college prediction market (students from many universities; these markets are about UW-Madison).
 Students bet reputation points called Clout, never money.
 Rules:
 - Explain the market: what the odds mean, why the price moved, what the comments say, and whether the crowd

@@ -1,15 +1,17 @@
 import { privileges } from "@/core/clout";
+import { UNIVERSITIES } from "@/core/universities";
+import Link from "next/link";
 import { querySql } from "@/server/warehouse";
 import { Clout } from "./clout";
 
-type Stats = { clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null; rank: number | null };
+type Stats = { school_id: string | null; clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null; rank: number | null };
 type Bin = { bucket: number; n: number; mean_forecast: number; hit_rate: number };
 
 /** Profile built from gold tables: Clout, Brier, calibration curve, flair. */
 export async function Profile({ userId, handle, liveClout }: { userId: string; handle: string; liveClout?: number }) {
   const [stats, bins, flair] = await Promise.all([
     querySql<Stats>(
-      `SELECT c.clout, c.open_stake, c.n_trades, c.n_markets, b.brier, l.rank
+      `SELECT c.school_id, c.clout, c.open_stake, c.n_trades, c.n_markets, b.brier, l.rank
        FROM {catalog}.gold.user_clout c
        LEFT JOIN {catalog}.gold.user_brier b USING (user_id)
        LEFT JOIN {catalog}.gold.leaderboard l ON l.user_id = c.user_id AND l.scope = 'overall'
@@ -32,6 +34,11 @@ export async function Profile({ userId, handle, liveClout }: { userId: string; h
       <section className="flex flex-wrap items-end gap-4">
         <div>
           <h1 className="text-2xl font-bold">@{handle}</h1>
+          {s?.school_id && (
+            <Link href={`/leaderboard?scope=school&value=${encodeURIComponent(s.school_id)}`} className="text-sm text-muted hover:text-accent">
+              {UNIVERSITIES.find((u) => u.school_id === s.school_id)?.name ?? s.school_id.replace(/^edu-/, "")}
+            </Link>
+          )}
           <div className="mt-1 flex flex-wrap gap-1.5">
             {flair.map((f) => (
               <span key={f.flair} className={`rounded px-2 py-0.5 text-xs font-medium ${f.kind === "oracle" ? "bg-yes-soft text-yes" : "bg-no-soft text-no"}`}>

@@ -8,7 +8,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "The Curve",
-  description: "Bet your Clout, not your cash. A campus prediction market for UW-Madison.",
+  description: "Bet your Clout, not your cash. A prediction market for college students, with leaderboards for every university.",
 };
 
 function Logo() {

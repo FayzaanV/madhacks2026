@@ -12,7 +12,8 @@
 The Databricks base and a first version of the website are built and deployed (on `main`):
 - **Data:** simulated campus in `the_curve.bronze`, Lakeflow pipeline producing silver/gold, Lakebase ledger seeded with the same data.
 - **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: purple board UI, markets, betting, AI analyst, comments, leaderboard, profiles.
-- **Accounts:** passwordless `@wisc.edu` email login; accounts, sign-in tokens and sessions live in Lakebase. REST API under `/api` (see §4 "REST API").
+- **Accounts:** passwordless university email login (pick your school, verify an email at its domain); accounts, sign-in tokens, sessions and schools live in Lakebase. REST API under `/api` (see §4 "REST API").
+- **Multi-university:** students from any university can join. Leaderboards exist for every school plus a school-vs-school league, and everyone can view every school's board.
 - **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
@@ -32,9 +33,9 @@ The Databricks base and a first version of the website are built and deployed (o
 ## 1. Project overview
 
 - **Name:** The Curve (working name). **Currency:** Clout.
-- **One-liner:** "Bet your Clout, not your cash." A campus prediction market for UW-Madison students where you stake your reputation, not money, on things students care about.
+- **One-liner:** "Bet your Clout, not your cash." A prediction market for college students where you stake your reputation, not money, on things students care about. Started at UW-Madison (the current markets are about UW), open to students from any university.
 - **Context:** 24-hour hackathon (MadHacks). We compete in the **Databricks track**, so Databricks is central to the product, not an add-on.
-- **Future:** expand to other universities (per-school spaces, inter-campus leaderboards like a "Big Ten Forecasting League"). Put a `school_id` on users and markets from day one, even though only `uw-madison` exists.
+- **Universities:** every user and market has a `school_id`. Listed schools (name, short name, email domain, color) are in `app/src/core/universities.json`, which is shared by the app and the simulation. Students from unlisted schools sign up with any `.edu` email and get `school_id = edu-<domain>`. Next: per-school market spaces.
 
 ---
 
@@ -79,7 +80,7 @@ proposed --(~10 upvotes)--> live --(close time)--> closed --> resolved
 LMSR automated market maker with a configurable liquidity parameter `b` (per market, default in `lib/`). Small bets should barely move prices. Formulas in §6.
 
 ### Social features
-- **Leaderboards** by course, major, dorm, club, plus a **Hall of Shame** (bottom of the board).
+- **Leaderboards:** a **University league** (schools ranked by average Clout of their forecasters, `gold.school_rankings`), a board **for every university** (`scope = 'school'`), all students combined, and by major, dorm, club and course, plus a **Hall of Shame** (bottom of the board). All boards are public to every signed-in or signed-out visitor.
 - **Calibration score** on every profile ("when you say 70%, you're right 71% of the time"), based on Brier score.
 - **Flair**, e.g. "Oracle of Econ 301", "Inverse Oracle".
 - **Smart Money line:** a second price line per market, stakes weighted by each user's **realized profit**, counting only users who have made Clout (profit > 0).
@@ -94,7 +95,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 - Next AI features (not built): **AI resolver** (propose outcome from an announcement; a 500+ human confirms) and **Syllabus→Markets**, both via `ai_query`.
 
 ### Rules and safety
-- `wisc.edu` login only, one account per email (see "Accounts and login" in §4). Note: the app is hosted on Databricks Apps, which puts a Databricks sign-in in front of it, so only workspace members can reach it until it's hosted publicly.
+- University email login only, one account per email (see "Accounts and login" in §4). Note: the app is hosted on Databricks Apps, which puts a Databricks sign-in in front of it, so only workspace members can reach it until it's hosted publicly.
 - No markets about individual students.
 - Instructors/TAs cannot trade on their own course's markets.
 - All demo data is **simulated** and must be **labeled as such** in the UI.
@@ -134,9 +135,10 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 2. **Workspace → Create → Git folder** → `https://github.com/FayzaanV/madhacks2026`. Pull, branch, and commit from the workspace.
 3. Deploy with the CLI from a laptop or the Git folder: `databricks bundle deploy -t dev`.
 
-### Accounts and login (wisc.edu, passwordless)
-- `POST /api/auth/request {email}` accepts only `@wisc.edu`, rate-limits to 3 links per email per 15 min, stores the **SHA-256** of a random token in Lakebase `login_tokens` (15 min, single use), and emails `/login/verify?token=…` via **Resend**. Without `RESEND_API_KEY` it returns the link as `devLink` and the login page shows it (demo mode).
+### Accounts and login (any university, passwordless)
+- `POST /api/auth/request {email, school_id}`: the email must be at the chosen school's domain (subdomains OK, e.g. `cs.wisc.edu`); `school_id: "other"` accepts any `.edu` and maps it to a listed school if the domain matches (`schoolForEmail` in `app/src/core/universities.ts`, with tests). Rate limit: 3 links per email per 15 min. Only the **SHA-256** of a random token is stored, in Lakebase `login_tokens` (15 min, single use). The link `/login/verify?token=…` is emailed via **Resend**; without `RESEND_API_KEY` it's returned as `devLink` and shown on screen (demo mode). On verify the school is re-derived from the verified email and inserted into `schools` if new.
 - `/login/verify` needs a click (POST to `/api/auth/verify`) so email link scanners can't use up the token. Verifying creates the user if new (100 Clout) and a session: random id in an `httpOnly`, `Secure`, `SameSite=Lax` cookie `curve_session`; only its SHA-256 is stored in `sessions` (30 days).
+- **Usernames:** new accounts get a random placeholder (`brave_wolf6383`), never derived from the email, so school IDs aren't exposed. After the first sign-in the app sends you to `/welcome` to pick one; change it later on `/me`. Rules: 3–20 chars `[a-z0-9_]`, case-insensitively unique across everyone (simulated users included), reserved names blocked (`setHandle` in `app/src/server/auth.ts`, `PATCH /api/me`).
 - No passwords anywhere. Sign-in links only point at `APP_ORIGIN`, localhost, or `the-curve-*.databricksapps.com` (forged Host headers are rejected).
 - `sessions` sync to `bronze.sessions_raw` without the hash or email; `login_tokens` never leave Lakebase. Code: `app/src/server/auth.ts`.
 - **Resend key:** create it at resend.com, then `databricks secrets create-scope the-curve` (once) and `databricks secrets put-secret the-curve resend_api_key`. Add a `secret` app resource for it in `resources/app.yml` and `RESEND_API_KEY` `valueFrom` in `app/app.yaml`. Locally put it in `app/.env.local`. Until a domain is verified in Resend, it only delivers to the Resend account owner's own address; set `RESEND_FROM` once a domain is verified.
@@ -149,6 +151,7 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | GET | `/api/auth/session` | – | current user or `null` |
 | DELETE | `/api/auth/session` | – | sign out |
 | GET | `/api/me` | ✓ | Clout, available, open stake, Brier, rank |
+| PATCH | `/api/me` | ✓ | `{handle}` → pick or change your username (409 if taken) |
 | DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
 | GET | `/api/markets?q=&status=` | – | markets with live prices |
 | GET | `/api/markets/:id` | – | market, Smart Money, AI insight |
@@ -207,9 +210,9 @@ Catalog: **`the_curve`**
 
 | Schema | Tables |
 |---|---|
-| `bronze` | `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
-| `silver` | `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_brier`, `user_course_clout`, `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
+| `bronze` | `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
+| `silver` | `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
+| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_brier`, `user_course_clout`, `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 
@@ -223,7 +226,7 @@ DATABRICKS_CATALOG=the_curve
 DATABASE_URL=                   # Lakebase or Supabase Postgres
 AUTH_SECRET=
 ```
-Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Sign in at `http://localhost:3000/login` with any `@wisc.edu` address; without `RESEND_API_KEY` the sign-in link is shown on screen (demo mode). On Databricks Apps, credentials come from the app's service principal and its resources.
+Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Sign in at `http://localhost:3000/login` with any university email; without `RESEND_API_KEY` the sign-in link is shown on screen (demo mode). On Databricks Apps, credentials come from the app's service principal and its resources.
 
 ---
 

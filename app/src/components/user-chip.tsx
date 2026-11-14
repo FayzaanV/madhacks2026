@@ -10,6 +10,12 @@ export async function UserChip() {
         Sign in
       </Link>
     );
+  if (!u.handle_chosen)
+    return (
+      <Link href="/welcome" className="rounded-xl bg-accent px-4 py-1.5 text-sm font-semibold text-accent-ink">
+        Pick a username
+      </Link>
+    );
   const clout = Math.round((u.clout + u.open_stake) * 10) / 10;
   return (
     <span className="flex items-center gap-1">

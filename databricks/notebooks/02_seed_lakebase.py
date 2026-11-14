@@ -38,13 +38,13 @@ NB_DIR = os.path.dirname(_nb if _nb.startswith("/Workspace") else "/Workspace" +
 schema_sql = open(os.path.join(os.path.dirname(os.path.dirname(NB_DIR)), "db", "schema.sql")).read()
 with conn.cursor() as cur:
     cur.execute(schema_sql)
-    cur.execute("TRUNCATE sessions, login_tokens, ai_questions, disputes, comments, resolutions, trades, outcomes, markets, users CASCADE")
+    cur.execute("TRUNCATE schools, sessions, login_tokens, ai_questions, disputes, comments, resolutions, trades, outcomes, markets, users CASCADE")
 conn.commit()
 
 # COMMAND ----------
 
 TABLES = [  # (bronze table, postgres table) in FK order
-    ("users_raw", "users"), ("markets_raw", "markets"), ("outcomes_raw", "outcomes"), ("trades_raw", "trades"),
+    ("schools_raw", "schools"), ("users_raw", "users"), ("markets_raw", "markets"), ("outcomes_raw", "outcomes"), ("trades_raw", "trades"),
     ("resolutions_raw", "resolutions"), ("comments_raw", "comments"), ("disputes_raw", "disputes"),
 ]
 DROP = {"source", "ingested_at"}

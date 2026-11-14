@@ -9,6 +9,7 @@ import { querySql } from "@/server/warehouse";
 
 type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
 type Leader = { user_id: string; handle: string; clout: number; rank: number };
+type SchoolRank = { school_id: string; short_name: string | null; color: string | null; avg_clout: number; rank: number };
 
 export default function Home({ searchParams }: PageProps<"/">) {
   return (
@@ -41,7 +42,7 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   const sp = await searchParams;
   const cat = typeof sp.cat === "string" ? sp.cat : "";
   const q = typeof sp.q === "string" ? sp.q : "";
-  const [markets, gaps, leaders] = await Promise.all([
+  const [markets, gaps, leaders, schools] = await Promise.all([
     listMarkets("live"),
     querySql<Gap>(
       "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
@@ -49,6 +50,9 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
     querySql<Leader>(
       "SELECT user_id, handle, clout, rank FROM {catalog}.gold.leaderboard WHERE scope = 'overall' ORDER BY rank LIMIT 5",
     ).catch(() => [] as Leader[]),
+    querySql<SchoolRank>(
+      "SELECT school_id, short_name, color, avg_clout, rank FROM {catalog}.gold.school_rankings ORDER BY rank LIMIT 5",
+    ).catch(() => [] as SchoolRank[]),
   ]);
   const gapOf = new Map(gaps.map((g) => [g.market_id, g.gap]));
   const shown = markets.filter((m) => matches(m, cat, q, gapOf));
@@ -76,7 +80,19 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
                 </li>
               ))}
             </SideList>
-            <SideList title="Top forecasters" href="/leaderboard">
+            <SideList title="University league" href="/leaderboard?scope=league">
+              {schools.map((sc) => (
+                <li key={sc.school_id}>
+                  <Link href={`/leaderboard?scope=school&value=${encodeURIComponent(sc.school_id)}`} className="flex items-center gap-3 py-1.5 text-sm hover:opacity-80">
+                    <span className="tabular w-4 text-xs text-muted">{sc.rank}</span>
+                    <i className="inline-block h-3 w-3 rounded-sm" style={{ background: sc.color ?? "var(--accent)" }} />
+                    <span className="flex-1 truncate">{sc.short_name ?? sc.school_id}</span>
+                    <span className="tabular text-xs text-muted">avg {sc.avg_clout.toFixed(1)}</span>
+                  </Link>
+                </li>
+              ))}
+            </SideList>
+            <SideList title="Top forecasters" href="/leaderboard?scope=overall">
               {leaders.map((l) => (
                 <li key={l.user_id}>
                   <Link href={`/u/${l.user_id}`} className="flex items-center gap-3 py-1.5 text-sm hover:opacity-80">

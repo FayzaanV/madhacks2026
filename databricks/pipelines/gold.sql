@@ -3,7 +3,7 @@
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_clout
 COMMENT 'Clout = 100 + realized profit (resolved winning shares - resolved spend). available = Clout - open stakes.'
-AS SELECT u.user_id, u.handle, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
+AS SELECT u.user_id, u.handle, u.school_id, u.major, u.dorm, u.club, u.archetype, u.is_simulated,
           100 + COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS clout,
           COALESCE(SUM(CASE WHEN t.is_resolved THEN t.won * t.shares - t.clout_spent END), 0) AS realized_profit,
           COALESCE(SUM(CASE WHEN NOT t.is_resolved THEN t.clout_spent END), 0) AS open_stake,
@@ -40,17 +40,18 @@ FROM the_curve.silver.trades_enriched WHERE is_resolved
 GROUP BY user_id, course;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.leaderboard
-COMMENT 'Ranks by scope (overall/major/dorm/club/course). rank_from_bottom powers the Hall of Shame.'
+COMMENT 'Ranks by scope (overall/school/major/dorm/club/course). rank_from_bottom powers the Hall of Shame.'
 AS WITH base AS (
-  SELECT c.user_id, c.handle, c.clout, b.brier, c.n_trades, c.major, c.dorm, c.club
+  SELECT c.user_id, c.handle, c.school_id, c.clout, b.brier, c.n_trades, c.major, c.dorm, c.club
   FROM the_curve.gold.user_clout c LEFT JOIN the_curve.gold.user_brier b USING (user_id)
   WHERE c.n_trades > 0
 ), scoped AS (
-  SELECT 'overall' AS scope, 'all' AS scope_value, user_id, handle, clout, brier, n_trades FROM base
-  UNION ALL SELECT 'major', major, user_id, handle, clout, brier, n_trades FROM base
-  UNION ALL SELECT 'dorm', dorm, user_id, handle, clout, brier, n_trades FROM base
-  UNION ALL SELECT 'club', club, user_id, handle, clout, brier, n_trades FROM base WHERE club <> 'none'
-  UNION ALL SELECT 'course', cc.course, cc.user_id, b.handle, cc.clout, cc.brier, cc.n_forecasts
+  SELECT 'overall' AS scope, 'all' AS scope_value, user_id, handle, school_id, clout, brier, n_trades FROM base
+  UNION ALL SELECT 'school', school_id, user_id, handle, school_id, clout, brier, n_trades FROM base
+  UNION ALL SELECT 'major', major, user_id, handle, school_id, clout, brier, n_trades FROM base
+  UNION ALL SELECT 'dorm', dorm, user_id, handle, school_id, clout, brier, n_trades FROM base WHERE dorm <> 'Off campus'
+  UNION ALL SELECT 'club', club, user_id, handle, school_id, clout, brier, n_trades FROM base WHERE club <> 'none'
+  UNION ALL SELECT 'course', cc.course, cc.user_id, b.handle, b.school_id, cc.clout, cc.brier, cc.n_forecasts
             FROM the_curve.gold.user_course_clout cc JOIN base b USING (user_id)
 )
 SELECT *,
@@ -115,3 +116,16 @@ SELECT user_id, CONCAT('Oracle of ', course) AS flair, 'oracle' AS kind FROM ran
 UNION ALL SELECT user_id, CONCAT('Inverse Oracle of ', course), 'inverse' FROM ranked WHERE worst = 1
 UNION ALL SELECT user_id, 'Campus Oracle', 'oracle' FROM overall WHERE top = 1
 UNION ALL SELECT user_id, 'Inverse Oracle', 'inverse' FROM overall WHERE bottom = 1;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.school_rankings
+COMMENT 'Inter-campus league: schools ranked by average Clout of their forecasters (min 1 trade)'
+AS WITH per AS (
+  SELECT c.school_id, COUNT(*) AS forecasters, AVG(c.clout) AS avg_clout, SUM(c.realized_profit) AS total_profit,
+         AVG(b.brier) AS avg_brier, MAX(c.clout) AS top_clout, SUM(c.n_trades) AS trades
+  FROM the_curve.gold.user_clout c LEFT JOIN the_curve.gold.user_brier b USING (user_id)
+  WHERE c.n_trades > 0
+  GROUP BY c.school_id
+)
+SELECT p.*, s.name, s.short_name, s.domain, s.color,
+       RANK() OVER (ORDER BY p.avg_clout DESC) AS rank
+FROM per p LEFT JOIN the_curve.silver.schools s USING (school_id);

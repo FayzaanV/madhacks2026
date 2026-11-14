@@ -34,7 +34,7 @@ export function AskAnalyst({ marketId, insight }: { marketId: string; insight: I
         body: JSON.stringify({ question: q }),
       });
       if (res.status === 401) {
-        setError("Sign in with your @wisc.edu email to ask the AI analyst.");
+        setError("Sign in with your university email to ask the AI analyst.");
         return;
       }
       if (!res.ok || !res.body) {

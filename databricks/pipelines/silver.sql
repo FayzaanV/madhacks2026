@@ -50,3 +50,9 @@ AS SELECT t.trade_id, t.market_id, t.user_id, t.outcome_index, t.clout_spent, t.
 FROM the_curve.bronze.trades_raw t
 JOIN the_curve.silver.markets m USING (market_id)
 LEFT JOIN the_curve.silver.users u USING (user_id);
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.schools
+COMMENT 'Universities (listed + discovered from .edu sign-ups)'
+AS SELECT school_id, name, short_name, domain, color, is_listed
+FROM the_curve.bronze.schools_raw
+QUALIFY ROW_NUMBER() OVER (PARTITION BY school_id ORDER BY ingested_at DESC) = 1;

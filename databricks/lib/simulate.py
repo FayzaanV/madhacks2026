@@ -7,11 +7,20 @@ Every row has is_simulated=True. The demo market (DEMO_MARKET_ID) is tuned to sh
 """
 from __future__ import annotations
 
+import json
 import math
+import os
 import random
 from datetime import datetime, timedelta, timezone
 
 import clout as c
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+UNIVERSITIES = json.load(open(os.path.join(_HERE, "..", "..", "app", "src", "core", "universities.json")))["universities"]
+# simulated students: UW-Madison is home turf, the rest come from other schools (markets are open to everyone)
+SCHOOL_MIX = [("uw-madison", 0.45), ("umich", 0.07), ("illinois", 0.07), ("umn", 0.06), ("purdue", 0.06),
+              ("osu", 0.06), ("northwestern", 0.05), ("indiana", 0.04), ("msu", 0.04), ("psu", 0.04),
+              ("uiowa", 0.03), ("ucla", 0.03)]
 
 SCHOOL = "uw-madison"
 DEMO_MARKET_ID = "m-demo-econ301-waitlist"
@@ -112,13 +121,14 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
     shares = [a[1] for a in ARCHETYPES]
     for k in range(n_users):
         arch = rng.choices(types, shares)[0]
+        school = rng.choices([s for s, _ in SCHOOL_MIX], [w for _, w in SCHOOL_MIX])[0]
         users.append({
             "user_id": f"sim-u{k:04d}",
-            "school_id": SCHOOL,
+            "school_id": school,
             "handle": f"{rng.choice(FIRST)}_{rng.choice(ANIMALS)}{rng.randint(1, 999)}",
             "email": f"sim-u{k:04d}@sim.wisc.edu",
             "major": rng.choice(MAJORS),
-            "dorm": rng.choice(DORMS),
+            "dorm": rng.choice(DORMS) if school == SCHOOL else "Off campus",
             "club": rng.choice(CLUBS),
             "class_year": rng.choice([2027, 2028, 2029, 2030]),
             "archetype": arch,
@@ -321,10 +331,11 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
         "users_raw": users, "markets_raw": markets, "outcomes_raw": outcomes,
         "trades_raw": sorted(trades, key=lambda r: r["created_at"]),
         "resolutions_raw": resolutions, "comments_raw": comments, "disputes_raw": [],
+        "schools_raw": [{**u, "is_listed": True, "is_simulated": False} for u in UNIVERSITIES],
     }
     for table in rows.values():
         for r in table:
-            r["is_simulated"] = True
+            r.setdefault("is_simulated", True)
     return rows
 
 
@@ -346,4 +357,4 @@ if __name__ == "__main__":
     st = [(prof.get(t["user_id"], 0.0), t["outcome_index"], t["clout_spent"]) for t in out["trades_raw"] if t["market_id"] == DEMO_MARKET_ID]
     print("demo smart money yes", round(c.smart_money(st, 2)[0], 3), "demo trades", len(st))
     from collections import Counter
-    print(Counter(u["archetype"] for u in sorted(out["users_raw"], key=lambda u: -u["clout"])[:100]))
+    print(Counter(u["school_id"] for u in out["users_raw"]).most_common(5))

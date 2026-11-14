@@ -18,7 +18,8 @@ TABLES = {  # postgres table -> bronze table
     "users": "users_raw", "markets": "markets_raw", "outcomes": "outcomes_raw", "trades": "trades_raw",
     "resolutions": "resolutions_raw", "comments": "comments_raw", "disputes": "disputes_raw",
     "ai_questions": "ai_questions_raw",
-    "sessions": "sessions_raw",          # session_hash is dropped below; login_tokens are never synced
+    "sessions": "sessions_raw",
+    "schools": "schools_raw",          # session_hash is dropped below; login_tokens are never synced
 }
 DROP_COLS = {"session_hash", "email"}
 for pg, bronze in TABLES.items():
