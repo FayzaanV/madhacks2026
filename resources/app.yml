@@ -1,0 +1,23 @@
+resources:
+  apps:
+    the_curve:
+      name: the-curve
+      description: "The Curve: bet your Clout, not your cash. Campus prediction market."
+      source_code_path: ../app
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: ai-model
+          serving_endpoint:
+            name: ${var.ai_model}
+            permission: CAN_QUERY
+        - name: ledger
+          postgres:
+            branch: projects/the-curve-ledger/branches/production
+            database: projects/the-curve-ledger/branches/production/databases/databricks-postgres
+            permission: CAN_CONNECT_AND_CREATE
+      permissions:
+        - group_name: users
+          level: CAN_USE

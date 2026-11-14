@@ -9,15 +9,16 @@
 
 ## 0. Current repo state (as of 2026-11-14)
 
-The repo is empty apart from `README.md`, `LICENSE` (MIT), and a GitHub **Python** `.gitignore` template. No app code, no package manager, no Databricks assets yet. Everything under "Repo structure" below is the plan, not what exists.
-
-- `.gitignore` ignores `.env` but **not** `node_modules/`, `.next/`, or `.env.local`. Add these before the first `npm install`.
+The Databricks base and a first version of the website are built and deployed (branch `feat/databricks-base`):
+- **Data:** simulated campus in `the_curve.bronze`, Lakeflow pipeline producing silver/gold, Lakebase ledger seeded with the same data.
+- **Website:** Next.js app in `/app`, deployed as the Databricks App **`the-curve`**: markets, betting, AI analyst, comments, leaderboard, profiles.
+- **Not built yet:** market proposal/upvotes, resolution + disputes UI, Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
 - **Workspace (Free Edition):** `https://dbc-9eafb64f-74c3.cloud.databricks.com`
-- All four teammates are workspace users and members of the group **`the-curve-team`**. Musa is the workspace admin; ask him to add or remove people. This repo is public, so **don't put teammate emails, tokens, or other credentials in it.**
-- Grant access to the group, never to individual users. Once the `the_curve` catalog exists, `the-curve-team` gets `ALL PRIVILEGES` on it.
-- Already in the workspace: SQL warehouse "Serverless Starter Warehouse", Databricks Apps and Lakebase (both available, nothing created yet), built-in model serving endpoints for `ai_query` (e.g. `databricks-meta-llama-3-3-70b-instruct`), and Genie.
+- All four teammates are workspace users and members of the workspace group **`the-curve-team`**. Musa is the workspace admin; ask him to add or remove people. This repo is public, so **don't put teammate emails, tokens, or other credentials in it.**
+- **Unity Catalog grants go to `account users`, not `the-curve-team`:** UC can only grant to account-level groups, and on Free Edition the account contains just this workspace's users (our team). `account users` has `ALL PRIVILEGES` on `the_curve` and `the_curve_ledger`.
+- In the workspace: SQL warehouse "Serverless Starter Warehouse" (`d3933f49c3b5beb3`), Lakebase project `the-curve-ledger`, Databricks App `the-curve`, Foundation Model endpoints (we use `databricks-meta-llama-3-3-70b-instruct`), Genie.
 
 **Get access (each teammate, once):**
 1. Accept the invite email and sign in at the workspace URL with the email you were invited with.
@@ -82,8 +83,16 @@ LMSR automated market maker with a configurable liquidity parameter `b` (per mar
 - **Smart Money line:** a second price line per market, weighted by Clout, counting only users with positive Clout.
 - **Fade button:** bet against the bottom-ranked forecasters' net position in this market.
 
+### AI market analyst (built)
+Every market has an **AI market analyst** panel. It explains the market; it never bets, never tells anyone what to bet, and never discusses individual students.
+- **Batch insight (Databricks-native):** `databricks/notebooks/30_ai_analyst_batch.py` builds a context per live market (question, crowd vs Smart Money from gold, 24h activity, price move, recent comments) and calls **`ai_query`** with a JSON-schema response → `the_curve.gold.market_ai_insights` (`summary`, `why_price_moved`, `crowd_vs_smart_money`, `comment_sentiment`, `mispricing_flag`, `confidence`). Each call is logged as an **MLflow trace** in the experiment `/Users/<you>/the-curve-ai-analyst`. Runs as the last task of the `refresh` job.
+- **Live "Ask the AI":** `POST /api/markets/[id]/ask` (`app/src/server/analyst.ts`) pulls fresh context (live prices and comments from Lakebase, Smart Money and the batch insight from gold), streams an answer from the Foundation Model endpoint, and logs each Q&A to the Lakebase table `ai_questions` (synced to `bronze.ai_questions_raw`).
+- Guardrails live in the system prompts in both files; keep them identical in spirit when editing.
+- Model is one variable: `ai_model` in `databricks.yml` / `DATABRICKS_AI_MODEL` (default `databricks-meta-llama-3-3-70b-instruct`).
+- Next AI features (not built): **AI resolver** (propose outcome from an announcement; a 500+ human confirms) and **Syllabus→Markets**, both via `ai_query`.
+
 ### Rules and safety
-- `wisc.edu` login only, one account per student.
+- `wisc.edu` login only, one account per student. **Current build:** identity comes from Databricks Apps (`X-Forwarded-Email`), so only workspace members can open the app; a public `wisc.edu` sign-in is a later item.
 - No markets about individual students.
 - Instructors/TAs cannot trade on their own course's markets.
 - All demo data is **simulated** and must be **labeled as such** in the UI.
@@ -99,10 +108,40 @@ LMSR automated market maker with a configurable liquidity parameter `b` (per mar
 
 ## 4. Databricks: use it early and often (CRITICAL)
 
+### Databricks products we use (and how)
+| Product | Our use | Where |
+|---|---|---|
+| **Asset Bundles** | All jobs, the pipeline and the app are code. `databricks bundle deploy -t dev` (your own copy, prefixed with your name) or `-t prod` (shared, deploy from `main` only). | `databricks.yml`, `resources/*.yml` |
+| **Unity Catalog** | Catalog `the_curve` (bronze/silver/gold/ml/ai) + `the_curve_ledger` (the Lakebase DB, readable from Spark/SQL). | `databricks/sql/00_setup_catalog.sql` |
+| **Lakebase** (Postgres) | Live trade ledger. Project `the-curve-ledger`, branch `production`, DB `databricks_postgres`. Auth = short-lived OAuth credential, no passwords. | `db/schema.sql`, `app/src/server/ledger.ts` |
+| **Lakeflow Jobs** (serverless) | `simulate_and_build` (sim → seed Lakebase → pipeline) and `refresh` (every 15 min: Lakebase → bronze → pipeline → AI analyst). | `resources/data.yml` |
+| **Lakeflow Declarative Pipelines** | `the-curve-medallion`: silver + gold materialized views. | `databricks/pipelines/*.sql` |
+| **SQL warehouse** | App reads gold via the Statement Execution API. | `app/src/server/warehouse.ts` |
+| **Foundation Model APIs + `ai_query`** | AI market analyst (batch in SQL, live chat from the app). | `30_ai_analyst_batch.py`, `app/src/server/analyst.ts` |
+| **MLflow** | Traces for every batch analyst call. Models (market accuracy, waitlist odds) still to do. | `30_ai_analyst_batch.py` |
+| **Databricks Apps** | Hosts the Next.js site as `the-curve`, with the warehouse, model endpoint and Lakebase attached as app resources. | `resources/app.yml`, `app/app.yaml` |
+| **Git folders** | Teammates edit notebooks in the workspace, synced to this GitHub repo. | see "Connecting GitHub" below |
+
 ### Architecture split
-- **App layer (Next.js + Tailwind):** UI, auth, live trading.
-- **Transactional DB:** **Databricks Lakebase** (managed Postgres) if our workspace has it; otherwise **Supabase**. The trade ledger lives here for realtime betting. Write the DB layer against plain Postgres so swapping is a connection-string change.
-- **Databricks = data and intelligence brain:** computes canonical Clout stats, calibration, leaderboards, and all ML/AI features. The app **reads** these results.
+- **App layer (Next.js + Tailwind, on Databricks Apps):** UI, identity, live trading, live AI chat.
+- **Transactional DB: Databricks Lakebase.** The trade ledger lives here for realtime betting. The DB layer is plain Postgres (`pg`), so Supabase stays a fallback.
+- **Databricks = data and intelligence brain:** computes canonical Clout stats, calibration, leaderboards, Smart Money, and all ML/AI features. The app **reads** these results from gold. (The app also stores `users.clout` in the ledger to enforce bet limits instantly; it must equal gold `user_clout`.)
+
+### Connecting GitHub (each teammate, once)
+1. Workspace → avatar → **Settings → Linked accounts → Git integration → GitHub → Link**, and authorize the Databricks GitHub App for `FayzaanV/madhacks2026`.
+2. **Workspace → Create → Git folder** → `https://github.com/FayzaanV/madhacks2026`. Pull, branch, and commit from the workspace.
+3. Deploy with the CLI from a laptop or the Git folder: `databricks bundle deploy -t dev`.
+
+### Running things
+```
+python3 scripts/dbsql.py "SELECT * FROM the_curve.gold.leaderboard LIMIT 5"   # SQL on the warehouse
+node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"                # SQL on Lakebase
+databricks bundle run -t dev simulate_and_build                              # rebuild sim data (TRUNCATES the ledger)
+databricks bundle run -t dev refresh                                         # sync + pipeline + AI insights
+databricks bundle run -t dev the_curve                                       # deploy the app
+cd app && npm run dev                                                        # local app (uses your CLI login)
+```
+After the app is (re)created, grant its service principal access: `node app/scripts/ledger-sql.mjs grant-app <client-id>` and `GRANT USE CATALOG, USE SCHEMA, SELECT ON CATALOG the_curve TO \`<client-id>\`` (client id from `databricks apps get the-curve`).
 
 ### Data flow
 ```
@@ -142,9 +181,9 @@ Catalog: **`the_curve`**
 
 | Schema | Tables |
 |---|---|
-| `bronze` | `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw` |
-| `silver` | `users`, `markets`, `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `user_clout`, `user_calibration` (bucketed curve), `user_brier`, `leaderboard` (scope: overall/course/major/dorm/club, incl. bottom ranks), `market_smart_money`, `market_mispricing`, `user_flair` |
+| `bronze` | `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
+| `silver` | `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
+| `gold` | `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_brier`, `user_course_clout`, `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 
@@ -158,31 +197,41 @@ DATABRICKS_CATALOG=the_curve
 DATABASE_URL=                   # Lakebase or Supabase Postgres
 AUTH_SECRET=
 ```
+Locally the app needs none of these: it uses your `databricks` CLI login (`databricks auth token`) and defaults to the team workspace. Set `DEV_USER_EMAIL` to pick which ledger user you are. On Databricks Apps, credentials come from the app's service principal and its resources.
 
 ---
 
-## 5. Repo structure (planned)
+## 5. Repo structure
 
 ```
-/app                  Next.js + Tailwind app (App Router lives in /app/src/app)
-/lib                  Shared TS core: lmsr.ts, clout.ts, scoring.ts (+ *.test.ts)
+databricks.yml        Asset Bundle root (targets dev/prod, variables)
+/resources            data.yml (pipeline + jobs), app.yml (Databricks App)
+/app                  Next.js 16 + Tailwind app; app.yaml = Databricks Apps config
+  /src/core           Shared TS core: lmsr.ts, clout.ts, scoring.ts (+ core.test.ts)
+  /src/server         Server-only: databricks auth, warehouse, Lakebase ledger, markets, analyst, user
+  /src/app            Pages + API routes (/api/markets/[id]/{trade,ask,comments})
+  /scripts            ledger-sql.mjs (SQL on Lakebase, grant-app)
 /lib/test-vectors.json  Shared fixtures so TS and Python implementations agree
 /databricks
-  /notebooks          00_simulate_data.py, 10_sync_bronze.py, 40_mlflow_*.py ...
-  /pipelines          bronze → silver → gold pipeline definitions
-  /sql                gold views, ai_query functions, Genie seed queries
-  /lib                clout.py — Python mirror of /lib for simulation + gold math
-/db                   Postgres schema + migrations for the trade ledger
-/scripts              seed, sync, and dev helper scripts
+  /lib                clout.py (Python mirror of app/src/core) + simulate.py + tests
+  /notebooks          01_simulate_data, 02_seed_lakebase, 10_sync_bronze, 30_ai_analyst_batch
+  /pipelines          silver.sql, gold.sql (Lakeflow declarative pipeline)
+  /sql                00_setup_catalog.sql
+/db                   schema.sql for the Lakebase ledger
+/scripts              dbsql.py (SQL on the warehouse), gen_test_vectors.py
 CLAUDE.md
 ```
-Numbered notebook prefixes = run order.
+Numbered notebook prefixes = run order. The TS core lives in `app/src/core` (not `/lib`) because Databricks Apps only uploads the `app/` folder.
 
 ---
 
 ## 6. Key logic to keep correct
 
-All of this lives in **one shared module** (`/lib`, mirrored in `/databricks/lib/clout.py`) with **unit tests** that both run against `/lib/test-vectors.json`. Never reimplement these formulas inline anywhere else.
+All of this lives in **one shared module** (`app/src/core/*.ts`, mirrored in `databricks/lib/clout.py`) with **unit tests** that both run against `lib/test-vectors.json`: `cd app && npm test` and `cd databricks/lib && python3 -m unittest test_clout`. The Python file is the reference: change it, run `python3 scripts/gen_test_vectors.py`, then make the TS pass. The gold SQL (`databricks/pipelines/gold.sql`) restates payout, Brier, calibration and Smart Money in SQL; keep it in step. Never reimplement these formulas anywhere else.
+
+- **`b` default = 500**: a 10-Clout bet moves a 50/50 binary market by ~1 point.
+- **Smart Money:** per outcome, `Σ clout_u · stake_u,k / Σ clout_u · stake_u` over users with Clout > 0 (`smart_money` / `smartMoney`).
+- **Known quirk to revisit:** with forecast = post-trade price of the outcome bought, someone who buys a 5% long shot and loses gets a *good* Brier (0.05² ≈ 0.003). The Hall of Shame therefore shows losers with low Brier.
 
 ### LMSR
 For outcomes `i` with outstanding shares `q_i` and liquidity `b`:

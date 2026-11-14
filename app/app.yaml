@@ -1,0 +1,11 @@
+# Databricks Apps runtime config. Apps runs `npm install` and `npm run build`, then this command.
+command: ["npm", "run", "start"]
+env:
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: DATABRICKS_AI_MODEL
+    valueFrom: ai-model
+  - name: DATABRICKS_CATALOG
+    value: the_curve
+  - name: LAKEBASE_ENDPOINT
+    value: projects/the-curve-ledger/branches/production/endpoints/primary
