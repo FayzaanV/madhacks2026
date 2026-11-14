@@ -27,6 +27,12 @@ function valueAt(points: Series["points"], t: number): number | null {
   return points[lo].v;
 }
 
+/** Axis tick: clock time for short ranges, dates for long ones. */
+const fmtTick = (t: number, span: number) =>
+  span <= 2 * 86400e3
+    ? new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+    : new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+
 const fmtTime = (t: number) =>
   new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 
@@ -60,10 +66,12 @@ export function TimeChart({
   const t1 = Math.max(tMax, t0 + 1);
 
   const W = 640;
-  const H = height;
+  const axisH = 22; // time labels under the plot
+  const H = height + axisH;
   const padL = 8;
-  const padR = 48;
+  const padR = 44;
   const padY = 14;
+  const plotBottom = H - axisH - padY;
   const x = (t: number) => padL + ((t - t0) / (t1 - t0)) * (W - padL - padR);
 
   const [lo, hi] = useMemo(() => {
@@ -79,7 +87,7 @@ export function TimeChart({
     const pad = Math.max((b - a) * 0.12, Math.abs(b) * 0.02, 1);
     return [a - pad, b + pad];
   }, [domain, series, t0]);
-  const y = (v: number) => H - padY - ((v - lo) / (hi - lo || 1)) * (H - padY * 2);
+  const y = (v: number) => plotBottom - ((v - lo) / (hi - lo || 1)) * (plotBottom - padY);
 
   /** Step path over the visible window, starting from the value carried in from before t0. */
   const path = (s: Series) => {
@@ -98,6 +106,25 @@ export function TimeChart({
   const ticks = domain
     ? [0, 0.25, 0.5, 0.75, 1].map((f) => lo + f * (hi - lo))
     : [0, 0.5, 1].map((f) => lo + f * (hi - lo));
+
+  // Labels next to each line at the crosshair (or the latest point): "Label 72%", nudged apart so they never overlap.
+  const LABEL_GAP = 21;
+  const lineLabels = (() => {
+    const items = series
+      .map((s, i) => ({ key: s.key, color: s.color, v: values[i], text: `${s.label} ${values[i] == null ? "" : format(values[i]!)}` }))
+      .filter((l) => l.v != null)
+      .map((l) => ({ ...l, y: y(l.v!), w: l.text.length * 6.4 }))
+      .sort((a, b) => a.y - b.y);
+    for (let i = 1; i < items.length; i++) items[i].y = Math.max(items[i].y, items[i - 1].y + LABEL_GAP);
+    const overflow = items.length ? items[items.length - 1].y - (plotBottom - 4) : 0;
+    if (overflow > 0) for (const it of items) it.y -= overflow;
+    for (let i = 0; i < items.length; i++) items[i].y = Math.max(items[i].y, padY + 6 + i * LABEL_GAP);
+    const cx = x(at);
+    const widest = Math.max(0, ...items.map((it) => it.w));
+    const right = cx + 8 + widest <= W - padR; // room on the right? otherwise sit left of the point
+    return items.map((it) => ({ ...it, x: right ? cx + 8 : cx - 8, anchor: (right ? "start" : "end") as "start" | "end" }));
+  })();
+  const timeTicks = [0.08, 0.36, 0.64, 0.92].map((f) => t0 + f * (t1 - t0));
 
   const onPointer = (e: React.PointerEvent) => {
     const r = svg.current?.getBoundingClientRect();
@@ -135,15 +162,37 @@ export function TimeChart({
             d={path(s)}
             fill="none"
             stroke={s.color}
-            strokeWidth={s.dashed ? 2 : 2.5}
-            strokeDasharray={s.dashed ? "6 4" : undefined}
+            strokeWidth={s.dashed ? 1.25 : 1.6}
+            strokeDasharray={s.dashed ? "5 4" : undefined}
             strokeLinejoin="round"
+            strokeLinecap="round"
+            vectorEffect="non-scaling-stroke"
           />
         ))}
-        <line x1={x(at)} x2={x(at)} y1={padY} y2={H - padY} stroke="var(--muted)" strokeOpacity={scrub == null ? 0 : 0.6} />
-        {series.map((s, i) =>
-          values[i] == null ? null : <circle key={s.key} cx={x(at)} cy={y(values[i]!)} r="4" fill={s.color} />,
+        {timeTicks.map((t) => (
+          <text key={t} x={x(t)} y={H - 6} fontSize="10" fill="var(--muted)" textAnchor="middle">
+            {fmtTick(t, t1 - t0)}
+          </text>
+        ))}
+        <line x1={x(at)} x2={x(at)} y1={padY} y2={plotBottom} stroke="var(--muted)" strokeWidth="1" strokeOpacity={scrub == null ? 0 : 0.5} />
+        {scrub != null && (
+          <text x={Math.min(Math.max(x(at), padL + 40), W - padR - 40)} y={padY - 3} fontSize="10" fill="var(--muted)" textAnchor="middle">
+            {fmtTime(at)}
+          </text>
         )}
+        {series.map((s, i) =>
+          values[i] == null ? null : (
+            <circle key={s.key} cx={x(at)} cy={y(values[i]!)} r="3.5" fill={s.color} stroke="var(--panel)" strokeWidth="1.5" />
+          ),
+        )}
+        {lineLabels.map((l) => (
+          <g key={l.key}>
+            <rect x={l.x - (l.anchor === "end" ? l.w : 0) - 3} y={l.y - 9} width={l.w + 6} height={18} rx={4} fill="var(--panel)" fillOpacity="0.85" />
+            <text x={l.x} y={l.y + 4} fontSize="11" fontWeight="600" fill={l.color} textAnchor={l.anchor}>
+              {l.text}
+            </text>
+          </g>
+        ))}
       </svg>
 
       <div className="mt-2 flex flex-wrap items-center gap-3">

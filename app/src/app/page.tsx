@@ -2,9 +2,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { Clout } from "@/components/clout";
 import { MarketCard } from "@/components/market-card";
-import { PriceChart } from "@/components/price-chart";
+import { OddsChart } from "@/components/odds-chart";
 import { CourseIcon, fmtClout } from "@/components/ui";
-import { listMarkets, priceHistory, type Market } from "@/server/markets";
+import { listMarkets, type Market } from "@/server/markets";
+import { oddsSeries } from "@/server/portfolio";
 import { querySql } from "@/server/warehouse";
 
 type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
@@ -140,7 +141,7 @@ function SideList({ title, href, children }: { title: string; href: string; chil
 }
 
 async function Featured({ m, gap }: { m: Market; gap?: Gap }) {
-  const history = (await priceHistory(m.market_id).catch(() => [])).filter((h) => h.outcome_index === 0);
+  const points = await oddsSeries(m.market_id).catch(() => []);
   return (
     <article className="rounded-2xl border border-line bg-panel p-5">
       <div className="flex items-center gap-3">
@@ -165,11 +166,7 @@ async function Featured({ m, gap }: { m: Market; gap?: Gap }) {
           )}
         </div>
         <div>
-          <PriceChart points={history.map((p) => ({ t: Date.parse(p.created_at), crowd: p.crowd_price, smart: p.smart_price }))} />
-          <div className="mt-1 flex gap-4 text-xs text-muted">
-            <span className="flex items-center gap-1"><i className="inline-block h-0.5 w-4 bg-accent" /> Crowd ({m.outcomes[0]?.label})</span>
-            <span className="flex items-center gap-1"><i className="inline-block h-0.5 w-4 border-t-2 border-dashed border-smart" /> Smart Money</span>
-          </div>
+          <OddsChart labels={m.outcomes.map((o) => o.label)} points={points} />
         </div>
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs text-muted">
