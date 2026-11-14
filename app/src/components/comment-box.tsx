@@ -30,7 +30,7 @@ export function CommentBox({ marketId }: { marketId: string }) {
         placeholder="Add a comment (no posts about individual students)"
         className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm"
       />
-      <button className="rounded-lg border border-line px-3 py-2 text-sm">Post</button>
+      <button className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink">Post</button>
       {error && <span className="text-sm text-no">{error}</span>}
     </form>
   );

@@ -50,11 +50,11 @@ export function AskAnalyst({ marketId, insight }: { marketId: string; insight: I
   }
 
   return (
-    <section className="rounded-xl border border-smart/40 bg-panel p-4">
+    <section className="rounded-2xl border border-accent/50 bg-panel p-4">
       <div className="flex items-center gap-2">
         <h2 className="font-semibold">AI market analyst</h2>
         {insight?.mispricing_flag && (
-          <span className="rounded bg-smart/10 px-1.5 py-0.5 text-xs font-medium text-smart">Possible mispricing</span>
+          <span className="rounded bg-accent-soft px-1.5 py-0.5 text-xs font-medium text-smart">Possible mispricing</span>
         )}
       </div>
       {insight ? (
@@ -85,7 +85,7 @@ export function AskAnalyst({ marketId, insight }: { marketId: string; insight: I
           maxLength={500}
           className="flex-1 rounded-lg border border-line bg-bg px-3 py-2 text-sm"
         />
-        <button disabled={busy} className="rounded-lg bg-smart px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
+        <button disabled={busy} className="rounded-lg bg-accent px-3 py-2 text-sm font-semibold text-accent-ink disabled:opacity-50">
           {busy ? "Thinking…" : "Ask"}
         </button>
       </form>

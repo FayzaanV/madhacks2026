@@ -276,7 +276,10 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
             continue
         place(ts(step, 1500), uid, DEMO_MARKET_ID, outcome, round(min(room, rng.uniform(5, 10)), 2))
         n_demo += 1
+    # spread the demo trades evenly over the market's life so the chart fills the whole window
     demo_trades = sorted(trades_by_market[DEMO_MARKET_ID], key=lambda r: r["created_at"])
+    for k, row in enumerate(demo_trades):
+        row["created_at"] = t0 + (t1 - t0) * ((k + 1) / len(demo_trades)) ** 0.9
     trades_by_market[DEMO_MARKET_ID] = demo_trades
 
     # -------------------------------------------------------------- finish rows

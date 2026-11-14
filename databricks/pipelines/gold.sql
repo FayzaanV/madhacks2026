@@ -69,12 +69,12 @@ FROM the_curve.silver.outcomes o
 LEFT JOIN stake s USING (market_id, outcome_index);
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_mispricing
-COMMENT 'Largest crowd vs Smart Money gap per market'
+COMMENT 'Largest crowd vs Smart Money gap per market (ties -> lowest outcome_index, i.e. Yes)'
 AS SELECT m.market_id, m.course, m.question, m.status, m.closes_at,
-          MAX_BY(sm.label, ABS(sm.smart_price - sm.crowd_price)) AS outcome_label,
+          MAX_BY(sm.label, ABS(sm.smart_price - sm.crowd_price) - sm.outcome_index * 1e-9) AS outcome_label,
           MAX(ABS(sm.smart_price - sm.crowd_price)) AS gap,
-          MAX_BY(sm.crowd_price, ABS(sm.smart_price - sm.crowd_price)) AS crowd_price,
-          MAX_BY(sm.smart_price, ABS(sm.smart_price - sm.crowd_price)) AS smart_price
+          MAX_BY(sm.crowd_price, ABS(sm.smart_price - sm.crowd_price) - sm.outcome_index * 1e-9) AS crowd_price,
+          MAX_BY(sm.smart_price, ABS(sm.smart_price - sm.crowd_price) - sm.outcome_index * 1e-9) AS smart_price
 FROM the_curve.silver.markets m JOIN the_curve.gold.market_smart_money sm USING (market_id)
 GROUP BY ALL;
 

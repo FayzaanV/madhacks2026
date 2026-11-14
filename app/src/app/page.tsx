@@ -1,64 +1,168 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { pct } from "@/components/clout";
-import { listMarkets } from "@/server/markets";
+import { Clout } from "@/components/clout";
+import { MarketCard } from "@/components/market-card";
+import { PriceChart } from "@/components/price-chart";
+import { CourseIcon, fmtClout } from "@/components/ui";
+import { listMarkets, priceHistory, type Market } from "@/server/markets";
 import { querySql } from "@/server/warehouse";
 
-export default function Home() {
+type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
+type Leader = { user_id: string; handle: string; clout: number; rank: number };
+
+export default function Home({ searchParams }: PageProps<"/">) {
   return (
-    <div className="space-y-6">
-      <section>
-        <h1 className="text-3xl font-bold tracking-tight">Bet your Clout, not your cash.</h1>
-        <p className="mt-1 text-muted">
-          Forecast waitlists, midterm averages and Badgers games. Your reputation is the stake.
-        </p>
-      </section>
-      <Suspense fallback={<p className="text-muted">Loading markets…</p>}>
-        <Markets />
-      </Suspense>
+    <Suspense fallback={<BoardSkeleton />}>
+      <Board searchParams={searchParams} />
+    </Suspense>
+  );
+}
+
+function BoardSkeleton() {
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {Array.from({ length: 9 }, (_, i) => (
+        <div key={i} className="h-40 animate-pulse rounded-2xl border border-line bg-panel" />
+      ))}
     </div>
   );
 }
 
-async function Markets() {
-  const [markets, gaps] = await Promise.all([
+function matches(m: Market, cat: string, q: string, gapOf: Map<string, number>) {
+  if (q && !`${m.question} ${m.course}`.toLowerCase().includes(q.toLowerCase())) return false;
+  if (!cat) return true;
+  if (cat === "mispriced") return (gapOf.get(m.market_id) ?? 0) >= 0.1;
+  if (cat === "closing") return Date.parse(m.closes_at) - Date.now() < 10 * 864e5;
+  if (cat === "campus") return m.course === "campus";
+  return m.course.toLowerCase().startsWith(cat.toLowerCase()) || m.course.toLowerCase().includes(`${cat.toLowerCase()} `);
+}
+
+async function Board({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  const sp = await searchParams;
+  const cat = typeof sp.cat === "string" ? sp.cat : "";
+  const q = typeof sp.q === "string" ? sp.q : "";
+  const [markets, gaps, leaders] = await Promise.all([
     listMarkets("live"),
-    querySql<{ market_id: string; gap: number }>(
-      "SELECT market_id, gap FROM {catalog}.gold.market_mispricing WHERE status = 'live'",
-    ).catch(() => []),
+    querySql<Gap>(
+      "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
+    ).catch(() => [] as Gap[]),
+    querySql<Leader>(
+      "SELECT user_id, handle, clout, rank FROM {catalog}.gold.leaderboard WHERE scope = 'overall' ORDER BY rank LIMIT 5",
+    ).catch(() => [] as Leader[]),
   ]);
   const gapOf = new Map(gaps.map((g) => [g.market_id, g.gap]));
+  const shown = markets.filter((m) => matches(m, cat, q, gapOf));
+  const featured = !cat && !q ? (markets.find((m) => m.market_id === gaps[0]?.market_id) ?? markets[0]) : null;
+
   return (
-    <ul className="grid gap-3 sm:grid-cols-2">
-      {markets.map((m) => {
-        const gap = gapOf.get(m.market_id) ?? 0;
-        return (
-          <li key={m.market_id}>
-            <Link
-              href={`/markets/${m.market_id}`}
-              className="block h-full rounded-xl border border-line bg-panel p-4 transition hover:border-accent"
-            >
-              <div className="flex items-center gap-2 text-xs text-muted">
-                <span className="rounded bg-bg px-1.5 py-0.5 font-medium">{m.course}</span>
-                <span>{m.n_trades.toLocaleString()} trades</span>
-                {gap >= 0.15 && (
-                  <span className="ml-auto rounded bg-smart/10 px-1.5 py-0.5 font-medium text-smart">
-                    Smart Money disagrees
-                  </span>
-                )}
-              </div>
-              <p className="mt-2 font-medium leading-snug">{m.question}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {m.outcomes.map((o) => (
-                  <span key={o.outcome_index} className="tabular rounded-md border border-line px-2 py-1 text-sm">
-                    {o.label} <b>{pct(o.price)}</b>
-                  </span>
-                ))}
-              </div>
+    <div className="space-y-8">
+      {featured && (
+        <section className="grid gap-4 lg:grid-cols-[1fr_340px]">
+          <Featured m={featured} gap={gaps[0]} />
+          <aside className="space-y-4">
+            <SideList title="Smart Money alerts" href="/?cat=mispriced">
+              {gaps.slice(0, 4).map((g, i) => (
+                <li key={g.market_id}>
+                  <Link href={`/markets/${g.market_id}`} className="flex items-start gap-3 py-1.5 hover:opacity-80">
+                    <span className="tabular w-4 pt-0.5 text-xs text-muted">{i + 1}</span>
+                    <span className="line-clamp-2 flex-1 text-sm">{g.question}</span>
+                    <span className="tabular shrink-0 text-right text-xs">
+                      <b className="block text-sm">
+                        {g.outcome_label} {Math.round(g.crowd_price * 100)}%
+                      </b>
+                      <span className="text-smart">smart {Math.round(g.smart_price * 100)}%</span>
+                    </span>
+                  </Link>
+                </li>
+              ))}
+            </SideList>
+            <SideList title="Top forecasters" href="/leaderboard">
+              {leaders.map((l) => (
+                <li key={l.user_id}>
+                  <Link href={`/u/${l.user_id}`} className="flex items-center gap-3 py-1.5 text-sm hover:opacity-80">
+                    <span className="tabular w-4 text-xs text-muted">{l.rank}</span>
+                    <span className="flex-1 truncate">@{l.handle}</span>
+                    <Clout value={l.clout} className="text-sm" />
+                  </Link>
+                </li>
+              ))}
+            </SideList>
+          </aside>
+        </section>
+      )}
+
+      <section>
+        <div className="mb-3 flex items-baseline gap-3">
+          <h2 className="text-xl font-bold">{q ? `Results for “${q}”` : "All markets"}</h2>
+          <span className="text-sm text-muted">{shown.length} live</span>
+        </div>
+        {shown.length === 0 ? (
+          <p className="rounded-2xl border border-line bg-panel p-8 text-center text-muted">No markets match. Try another category.</p>
+        ) : (
+          <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {shown.map((m) => (
+              <li key={m.market_id}>
+                <MarketCard m={m} smartGap={gapOf.get(m.market_id)} />
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SideList({ title, href, children }: { title: string; href: string; children: React.ReactNode }) {
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-4">
+      <Link href={href} className="mb-1 flex items-center gap-1 font-semibold hover:text-accent">
+        {title} <span aria-hidden>›</span>
+      </Link>
+      <ol>{children}</ol>
+    </div>
+  );
+}
+
+async function Featured({ m, gap }: { m: Market; gap?: Gap }) {
+  const history = (await priceHistory(m.market_id).catch(() => [])).filter((h) => h.outcome_index === 0);
+  return (
+    <article className="rounded-2xl border border-line bg-panel p-5">
+      <div className="flex items-center gap-3">
+        <CourseIcon course={m.course} size={48} />
+        <Link href={`/markets/${m.market_id}`} className="text-2xl font-bold leading-tight hover:underline">
+          {m.question}
+        </Link>
+      </div>
+      <div className="mt-4 grid gap-4 md:grid-cols-[220px_1fr]">
+        <div className="space-y-3">
+          {m.outcomes.map((o) => (
+            <Link key={o.outcome_index} href={`/markets/${m.market_id}?pick=${o.outcome_index}`} className="flex items-center justify-between rounded-lg px-1 py-1 hover:bg-panel-2">
+              <span>{o.label}</span>
+              <span className="tabular text-2xl font-bold">{Math.round(o.price * 100)}%</span>
             </Link>
-          </li>
-        );
-      })}
-    </ul>
+          ))}
+          {gap && gap.market_id === m.market_id && (
+            <p className="rounded-lg bg-accent-soft p-3 text-sm">
+              <b className="text-smart">Smart Money says {Math.round(gap.smart_price * 100)}%</b> on {gap.outcome_label}. The crowd says{" "}
+              {Math.round(gap.crowd_price * 100)}%.
+            </p>
+          )}
+        </div>
+        <div>
+          <PriceChart points={history.map((p) => ({ t: Date.parse(p.created_at), crowd: p.crowd_price, smart: p.smart_price }))} />
+          <div className="mt-1 flex gap-4 text-xs text-muted">
+            <span className="flex items-center gap-1"><i className="inline-block h-0.5 w-4 bg-accent" /> Crowd ({m.outcomes[0]?.label})</span>
+            <span className="flex items-center gap-1"><i className="inline-block h-0.5 w-4 border-t-2 border-dashed border-smart" /> Smart Money</span>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 flex items-center gap-2 text-xs text-muted">
+        <span className="tabular">{fmtClout(m.volume)} Clout vol.</span>·<span>{m.n_trades.toLocaleString()} trades</span>·
+        <span>closes {new Date(m.closes_at).toLocaleDateString()}</span>
+        <Link href={`/markets/${m.market_id}`} className="ml-auto rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-ink">
+          Trade
+        </Link>
+      </div>
+    </article>
   );
 }

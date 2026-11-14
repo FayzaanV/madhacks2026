@@ -34,7 +34,7 @@ export async function Profile({ userId, handle, liveClout }: { userId: string; h
           <h1 className="text-2xl font-bold">@{handle}</h1>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {flair.map((f) => (
-              <span key={f.flair} className={`rounded px-2 py-0.5 text-xs font-medium ${f.kind === "oracle" ? "bg-yes/10 text-yes" : "bg-no/10 text-no"}`}>
+              <span key={f.flair} className={`rounded px-2 py-0.5 text-xs font-medium ${f.kind === "oracle" ? "bg-yes-soft text-yes" : "bg-no-soft text-no"}`}>
                 {f.flair}
               </span>
             ))}
@@ -50,7 +50,7 @@ export async function Profile({ userId, handle, liveClout }: { userId: string; h
         <Stat label="Can" value={privileges(clout).join(", ")} />
       </section>
 
-      <section className="rounded-xl border border-line bg-panel p-4">
+      <section className="rounded-2xl border border-line bg-panel p-4">
         <h2 className="font-semibold">Calibration</h2>
         <p className="text-sm text-muted">
           {calErr == null
@@ -65,7 +65,7 @@ export async function Profile({ userId, handle, liveClout }: { userId: string; h
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-3">
+    <div className="rounded-2xl border border-line bg-panel p-3">
       <div className="text-xs text-muted">{label}</div>
       <div className="tabular mt-0.5 font-semibold">{value}</div>
       {hint && <div className="text-xs text-muted">{hint}</div>}

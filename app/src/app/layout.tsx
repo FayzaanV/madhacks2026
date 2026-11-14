@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
+import { CategoryTabs } from "@/components/category-tabs";
+import { SearchBox } from "@/components/search-box";
 import { UserChip } from "@/components/user-chip";
 import "./globals.css";
 
@@ -9,33 +11,45 @@ export const metadata: Metadata = {
   description: "Bet your Clout, not your cash. A campus prediction market for UW-Madison.",
 };
 
+function Logo() {
+  return (
+    <Link href="/" className="flex shrink-0 items-center gap-2 font-bold tracking-tight">
+      <svg viewBox="0 0 24 24" className="h-6 w-6 text-accent" aria-hidden>
+        <rect x="1" y="1" width="22" height="22" rx="6" fill="currentColor" />
+        <path d="M5 17 C9 17 9 7 13 7 S17 12 19 9" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
+      </svg>
+      <span className="text-lg">The Curve</span>
+    </Link>
+  );
+}
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className="h-full antialiased">
-      <body className="min-h-full flex flex-col">
-        <header className="border-b border-line bg-panel">
-          <div className="mx-auto flex max-w-5xl items-center gap-6 px-4 py-3">
-            <Link href="/" className="text-lg font-bold tracking-tight">
-              The <span className="text-accent">Curve</span>
-            </Link>
-            <nav className="flex gap-4 text-sm text-muted">
-              <Link href="/" className="hover:text-ink">Markets</Link>
-              <Link href="/leaderboard" className="hover:text-ink">Leaderboard</Link>
-              <Link href="/me" className="hover:text-ink">Profile</Link>
-            </nav>
-            <div className="ml-auto">
-              <Suspense fallback={<span className="text-sm text-muted">…</span>}>
+      <body className="flex min-h-full flex-col">
+        <header className="sticky top-0 z-20 border-b border-line bg-bg/95 backdrop-blur">
+          <div className="mx-auto flex max-w-7xl items-center gap-4 px-4 py-3">
+            <Logo />
+            <Suspense fallback={<div className="hidden flex-1 md:block" />}>
+              <SearchBox />
+            </Suspense>
+            <nav className="ml-auto flex items-center gap-1 text-sm md:ml-0">
+              <Link href="/leaderboard" className="rounded-lg px-3 py-1.5 text-muted hover:bg-panel-2 hover:text-ink">
+                Leaderboard
+              </Link>
+              <Suspense fallback={<span className="px-3 text-sm text-muted">…</span>}>
                 <UserChip />
               </Suspense>
-            </div>
+            </nav>
           </div>
+          <Suspense fallback={<div className="h-10" />}>
+            <CategoryTabs />
+          </Suspense>
         </header>
-        <div className="bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-200 text-center text-xs py-1">
-          Demo: market data is simulated. No real money anywhere. Clout only.
-        </div>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6">{children}</main>
-        <footer className="py-6 text-center text-xs text-muted">
-          Ledger on Lakebase · analytics on Lakeflow + Unity Catalog · AI on Databricks Foundation Models
+        <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+        <footer className="border-t border-line py-6 text-center text-xs text-muted">
+          Simulated demo data · Clout only, no real money · Ledger on Lakebase · analytics on Lakeflow + Unity Catalog ·
+          AI on Databricks Foundation Models
         </footer>
       </body>
     </html>

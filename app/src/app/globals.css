@@ -1,40 +1,56 @@
 @import "tailwindcss";
 
+/* The Curve theme: deep purple board, violet accent. Dark is the primary look. */
 :root {
-  --bg: #f7f6f3;
+  --bg: #f6f4fb;
   --panel: #ffffff;
-  --ink: #16151a;
-  --muted: #6b6873;
-  --line: #e4e1da;
-  --accent: #c5050c; /* Badger red */
-  --yes: #0f7b4f;
-  --no: #b42318;
-  --smart: #6d28d9;
+  --panel-2: #f0ecf9;
+  --ink: #1b1530;
+  --muted: #6e6787;
+  --line: #e3ddf2;
+  --accent: #7c3aed;
+  --accent-ink: #ffffff;
+  --accent-soft: #ede5ff;
+  --yes: #15803d;
+  --yes-soft: #dcf5e5;
+  --no: #c2283a;
+  --no-soft: #fbe2e5;
+  --smart: #a21caf;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0f0e12;
-    --panel: #18171c;
-    --ink: #f1eff4;
-    --muted: #9a96a3;
-    --line: #2a2830;
-    --accent: #ef4444;
-    --yes: #34d399;
-    --no: #f87171;
-    --smart: #a78bfa;
+    --bg: #110d1f;
+    --panel: #1b1630;
+    --panel-2: #241e3d;
+    --ink: #f2eefc;
+    --muted: #9b93b8;
+    --line: #2e2750;
+    --accent: #8b5cf6;
+    --accent-ink: #ffffff;
+    --accent-soft: #2c2252;
+    --yes: #3ddc84;
+    --yes-soft: #163b2a;
+    --no: #ff5c6c;
+    --no-soft: #43202a;
+    --smart: #e879f9;
   }
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
   --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
   --color-yes: var(--yes);
+  --color-yes-soft: var(--yes-soft);
   --color-no: var(--no);
+  --color-no-soft: var(--no-soft);
   --color-smart: var(--smart);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
@@ -48,4 +64,11 @@ body {
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
