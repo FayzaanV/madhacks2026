@@ -1,0 +1,66 @@
+resources:
+  pipelines:
+    medallion:
+      name: the-curve-medallion
+      catalog: ${var.catalog}
+      schema: silver
+      serverless: true
+      photon: true
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ../databricks/pipelines/silver.sql
+        - file:
+            path: ../databricks/pipelines/gold.sql
+
+  jobs:
+    simulate_and_build:
+      name: the-curve-simulate-and-build
+      description: Regenerate simulated bronze data, then refresh silver/gold.
+      tasks:
+        - task_key: simulate
+          notebook_task:
+            notebook_path: ../databricks/notebooks/01_simulate_data.py
+            base_parameters:
+              catalog: ${var.catalog}
+              seed: "42"
+        - task_key: seed_lakebase
+          depends_on:
+            - task_key: simulate
+          notebook_task:
+            notebook_path: ../databricks/notebooks/02_seed_lakebase.py
+            base_parameters:
+              catalog: ${var.catalog}
+        - task_key: medallion
+          depends_on:
+            - task_key: simulate
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion.id}
+            full_refresh: true
+
+    refresh:
+      name: the-curve-refresh
+      description: Lakebase ledger -> bronze, refresh silver/gold, then regenerate AI analyst insights.
+      schedule:
+        quartz_cron_expression: "0 0/15 * * * ?"
+        timezone_id: America/Chicago
+      tasks:
+        - task_key: sync_bronze
+          notebook_task:
+            notebook_path: ../databricks/notebooks/10_sync_bronze.py
+            base_parameters:
+              catalog: ${var.catalog}
+              ledger_catalog: the_curve_ledger
+        - task_key: medallion
+          depends_on:
+            - task_key: sync_bronze
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion.id}
+        - task_key: ai_analyst
+          depends_on:
+            - task_key: medallion
+          notebook_task:
+            notebook_path: ../databricks/notebooks/30_ai_analyst_batch.py
+            base_parameters:
+              catalog: ${var.catalog}
+              ai_model: ${var.ai_model}

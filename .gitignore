@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+# lib/ removed from the Python template: it hid our shared /lib and databricks/lib
 lib64/
 parts/
 sdist/

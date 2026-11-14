@@ -21,6 +21,22 @@ export function privileges(clout: number): string[] {
   return out;
 }
 
+/**
+ * Smart Money line: Clout-weighted split of stakes, positive-Clout users only.
+ * stakes: [userClout, outcomeIndex, cloutStaked]. Returns null if no positive-Clout stake.
+ */
+export function smartMoney(
+  stakes: readonly (readonly [number, number, number])[],
+  nOutcomes: number,
+): number[] | null {
+  const w = new Array<number>(nOutcomes).fill(0);
+  for (const [userClout, outcome, staked] of stakes) {
+    if (userClout > 0 && staked > 0) w[outcome] += userClout * staked;
+  }
+  const total = w.reduce((a, x) => a + x, 0);
+  return total > 0 ? w.map((x) => x / total) : null;
+}
+
 /** trades: [outcomeIndex, cloutSpent, shares]. Net = winning shares - total spent. */
 export function netCloutChange(trades: readonly (readonly [number, number, number])[], winner: number): number {
   let won = 0;

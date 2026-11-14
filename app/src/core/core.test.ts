@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import vectors from "../../../lib/test-vectors.json";
 import { applyTrade, cost, costToBuy, prices, sharesForAmount } from "./lmsr";
-import { maxBet, netCloutChange, privileges, remainingBet } from "./clout";
+import { maxBet, netCloutChange, privileges, remainingBet, smartMoney } from "./clout";
 import { brier, calibrationCurve, meanBrier } from "./scoring";
 
 const TOL = vectors.tolerance;
@@ -26,6 +26,11 @@ describe("shared vectors (must match databricks/lib/clout.py)", () => {
     for (const v of vectors.privileges) expect(privileges(v.clout)).toEqual(v.privileges);
     for (const v of vectors.net_clout_change)
       close(netCloutChange(v.trades as [number, number, number][], v.winner), v.net);
+    for (const v of vectors.smart_money) {
+      const got = smartMoney(v.stakes as [number, number, number][], v.n);
+      if (v.smart_money === null) expect(got).toBeNull();
+      else got!.forEach((x, k) => close(x, v.smart_money![k]));
+    }
   });
 
   it("scoring", () => {

@@ -9,3 +9,8 @@ CREATE SCHEMA IF NOT EXISTS the_curve.ai COMMENT 'AI analyst questions, syllabus
 -- `the-curve-team` is a workspace-local group, which Unity Catalog cannot grant to.
 -- On Free Edition the account contains only this workspace's users (our team), so grant to `account users`.
 GRANT ALL PRIVILEGES ON CATALOG the_curve TO `account users`;
+
+-- The Lakebase ledger, registered in Unity Catalog so Spark/SQL can read it directly:
+--   databricks postgres create-project the-curve-ledger --json '{"spec":{"display_name":"The Curve ledger"}}'
+--   databricks postgres create-catalog the_curve_ledger --json '{"spec":{"branch":"projects/the-curve-ledger/branches/production","postgres_database":"databricks_postgres"}}'
+GRANT ALL PRIVILEGES ON CATALOG the_curve_ledger TO `account users`;
