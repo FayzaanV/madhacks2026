@@ -96,7 +96,7 @@ SELECT *,
 FROM scoped;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.market_smart_money
-COMMENT 'Smart Money: each profitable user's cost basis still held per outcome, weighted by realized profit, vs crowd price'
+COMMENT 'Smart Money: cost basis still held per outcome by profitable users, weighted by realized profit, vs crowd price'
 AS WITH pos AS (
   SELECT market_id, outcome_index, user_id, GREATEST(SUM(basis_change), 0) AS stake
   FROM the_curve.silver.trades_enriched GROUP BY ALL
