@@ -218,3 +218,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# The Curve: Node / Next.js / Databricks
+node_modules/
+.next/
+out/
+.env.local
+.env*.local
+.databricks/
+*.tsbuildinfo
+next-env.d.ts
