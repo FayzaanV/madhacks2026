@@ -1,4 +1,4 @@
-"""The Curve core math: LMSR pricing, Clout rules, payouts, Brier/calibration.
+"""Yomi core math: LMSR pricing, Clout rules, payouts, Brier/calibration.
 
 Python mirror of app/src/core/*.ts. Both are tested against lib/test-vectors.json,
 so any change here must be made in the TypeScript too (and vice versa).

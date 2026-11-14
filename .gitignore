@@ -219,7 +219,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# The Curve: Node / Next.js / Databricks
+# Yomi: Node / Next.js / Databricks
 node_modules/
 .next/
 out/

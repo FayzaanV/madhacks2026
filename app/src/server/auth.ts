@@ -100,11 +100,11 @@ export async function requestLogin(rawEmail: unknown, rawSchool: unknown, origin
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
     body: JSON.stringify({
-      from: process.env.RESEND_FROM ?? "The Curve <onboarding@resend.dev>",
+      from: process.env.RESEND_FROM ?? "Yomi <onboarding@resend.dev>",
       to: [email],
-      subject: "Your sign-in link for The Curve",
-      text: `Sign in to The Curve: ${link}\n\nThis link works once and expires in ${TOKEN_TTL_MIN} minutes. If you didn't ask for it, ignore this email.`,
-      html: `<p>Sign in to <b>The Curve</b>:</p><p><a href="${link}">Sign in</a></p><p>This link works once and expires in ${TOKEN_TTL_MIN} minutes. If you didn't ask for it, ignore this email.</p>`,
+      subject: "Your sign-in link for Yomi",
+      text: `Sign in to Yomi: ${link}\n\nThis link works once and expires in ${TOKEN_TTL_MIN} minutes. If you didn't ask for it, ignore this email.`,
+      html: `<p>Sign in to <b>Yomi</b>:</p><p><a href="${link}">Sign in</a></p><p>This link works once and expires in ${TOKEN_TTL_MIN} minutes. If you didn't ask for it, ignore this email.</p>`,
     }),
   });
   if (!res.ok) {
@@ -249,6 +249,6 @@ export async function requestOrigin(): Promise<string> {
   const h = await headers();
   const host = (h.get("x-forwarded-host") ?? h.get("host") ?? "").toLowerCase();
   if (/^localhost(:\d+)?$/.test(host)) return `http://${host}`;
-  if (/^the-curve-[a-z0-9-]+\.[a-z0-9.-]*databricksapps\.com$/.test(host)) return `https://${host}`;
+  if (/^yomi-[a-z0-9-]+\.[a-z0-9.-]*databricksapps\.com$/.test(host)) return `https://${host}`;
   throw new AuthError("Sign-in isn't available from this address.", 400);
 }

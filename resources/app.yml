@@ -1,8 +1,8 @@
 resources:
   apps:
-    the_curve:
-      name: the-curve
-      description: "The Curve: bet your Clout, not your cash. Campus prediction market."
+    yomi:
+      name: yomi
+      description: "Yomi: bet your Clout, not your cash. Campus prediction market."
       source_code_path: ../app
       resources:
         - name: sql-warehouse
