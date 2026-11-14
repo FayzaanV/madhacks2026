@@ -3,24 +3,25 @@
 import { TimeChart, type Series } from "./time-chart";
 
 const PALETTE = ["var(--accent)", "#22c55e", "#f59e0b", "#38bdf8"];
+const BINARY_COLORS = ["var(--yes)", "var(--no)"]; // Yes green, No red
 const pct = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 
 /**
  * Market odds over time. Crowd odds are live from the Lakebase ledger (every trade); the dashed Smart Money
- * line comes from the gold pipeline. Binary markets chart Yes; multiple choice charts the top 4 outcomes.
+ * line comes from the gold pipeline. Binary markets chart both Yes and No; multiple choice charts the top 4 outcomes.
  */
 export function OddsChart({ labels, points }: { labels: string[]; points: { t: number; p: number[]; smart: number | null }[] }) {
   const binary = labels.length === 2;
   const last = points.at(-1)?.p ?? [];
-  const shown = binary ? [0] : labels.map((_, i) => i).sort((a, b) => (last[b] ?? 0) - (last[a] ?? 0)).slice(0, 4);
+  const shown = binary ? [0, 1] : labels.map((_, i) => i).sort((a, b) => (last[b] ?? 0) - (last[a] ?? 0)).slice(0, 4);
   const series: Series[] = shown.map((i, k) => ({
     key: `o${i}`,
     label: labels[i],
-    color: PALETTE[k],
+    color: binary ? BINARY_COLORS[k] : PALETTE[k],
     points: points.map((p) => ({ t: p.t, v: p.p[i] ?? null })),
   }));
   if (binary && points.some((p) => p.smart != null))
-    series.push({ key: "smart", label: "Smart Money", color: "var(--smart)", dashed: true, points: points.map((p) => ({ t: p.t, v: p.smart })) });
+    series.push({ key: "smart", label: `Smart Money (${labels[0]})`, color: "var(--smart)", dashed: true, points: points.map((p) => ({ t: p.t, v: p.smart })) });
 
   return (
     <TimeChart
