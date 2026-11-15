@@ -25,6 +25,24 @@ export type Market = {
   n_trades: number;
   volume: number;
   outcomes: Outcome[];
+  category: "academic" | "sports" | "intramural" | "union" | string;
+  sport: string | null;
+  event_ref: string | null;
+  market_kind: string | null;
+  /** Live/final score for sports and intramural markets. */
+  game: GameBadge | null;
+};
+
+export type GameBadge = {
+  kind: "sports" | "intramural";
+  state: "pre" | "in" | "post";
+  detail: string | null;
+  home: string;
+  away: string;
+  home_score: number | null;
+  away_score: number | null;
+  starts_at: string;
+  link: string;
 };
 
 function withPrices<T extends { liquidity_b: number; outcomes: Omit<Outcome, "price">[] }>(m: T) {
@@ -35,6 +53,20 @@ function withPrices<T extends { liquidity_b: number; outcomes: Omit<Outcome, "pr
 const MARKET_SQL = `
   SELECT m.market_id, m.course, m.question, m.market_type, m.status, m.liquidity_b, m.resolution_source,
          m.closes_at, m.is_simulated, m.closes_at < now() AS past_close,
+         m.category, m.sport, m.event_ref, m.market_kind,
+         CASE WHEN m.category = 'sports' THEN (
+           SELECT json_build_object('kind', 'sports', 'state', sg.state, 'detail', sg.detail, 'home', sg.home_abbr,
+                    'away', sg.away_abbr, 'home_score', sg.home_score, 'away_score', sg.away_score, 'starts_at', sg.starts_at,
+                    'link', '/sports#' || sg.event_id)
+           FROM sports_games sg WHERE sg.event_id = m.event_ref)
+         WHEN m.category = 'intramural' THEN (
+           SELECT json_build_object('kind', 'intramural',
+                    'state', CASE WHEN g.status IN ('final', 'forfeit', 'canceled') THEN 'post'
+                                  WHEN g.starts_at < now() THEN 'in' ELSE 'pre' END,
+                    'detail', initcap(g.status), 'home', ht.name, 'away', at.name, 'home_score', g.home_score,
+                    'away_score', g.away_score, 'starts_at', g.starts_at, 'link', '/intramurals/' || g.game_id)
+           FROM im_games g JOIN im_teams ht ON ht.team_id = g.home_team_id JOIN im_teams at ON at.team_id = g.away_team_id
+           WHERE 'im:' || g.game_id = m.event_ref) END AS game,
          r.winning_outcome_index, r.rationale AS resolution_note,
          (SELECT count(*)::int FROM trades t WHERE t.market_id = m.market_id) AS n_trades,
          (SELECT coalesce(sum(abs(clout_spent)), 0)::float FROM trades t WHERE t.market_id = m.market_id) AS volume,
@@ -169,6 +201,14 @@ function trade<T>(userId: string, marketId: string, outcomeIndex: number, fn: (t
     if (recent >= MAX_TRADES_PER_MINUTE) throw new TradeError("You're trading too fast. Wait a minute and try again.", 429);
     const staff = await c.query("SELECT 1 FROM course_staff WHERE user_id = $1 AND course = $2", [userId, m.course]);
     if (staff.rowCount) throw new TradeError(`Instructors and TAs can't trade on ${m.course} markets.`, 403);
+    // Intramural captains report their game's result, so they can't trade that game's market.
+    const captain = await c.query(
+      `SELECT 1 FROM markets mk JOIN im_games g ON mk.event_ref = 'im:' || g.game_id
+       JOIN im_teams t ON t.team_id IN (g.home_team_id, g.away_team_id)
+       WHERE mk.market_id = $1 AND t.captain_user_id = $2 LIMIT 1`,
+      [marketId, userId],
+    );
+    if (captain.rowCount) throw new TradeError("Captains can't trade on their own team's game.", 403);
     const os = (
       await c.query("SELECT outcome_index, q_shares FROM outcomes WHERE market_id = $1 ORDER BY outcome_index FOR UPDATE", [
         marketId,
@@ -277,6 +317,14 @@ export async function resolveMarket(
   rationale: string,
 ) {
   if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
+  return settleMarket(marketId, winner, rationale, user.user_id);
+}
+
+/**
+ * Settle a market with no permission check: the payout transaction shared by manual resolution and the
+ * auto-resolvers (sports poller as u-yomi-sports, intramurals as u-yomi-im). Callers decide who may settle.
+ */
+export async function settleMarket(marketId: string, winner: number | "void", rationale: string, resolvedBy: string) {
   const note = rationale.trim().slice(0, 1000);
   const out = await tx(async (c) => {
     const m = (await c.query("SELECT status FROM markets WHERE market_id = $1 FOR UPDATE", [marketId])).rows[0];
@@ -315,7 +363,7 @@ export async function resolveMarket(
        ON CONFLICT (market_id) DO UPDATE SET winning_outcome_index = EXCLUDED.winning_outcome_index,
          resolved_by = EXCLUDED.resolved_by, rationale = EXCLUDED.rationale, resolved_at = now(),
          dispute_deadline = EXCLUDED.dispute_deadline, final_at = NULL, status = EXCLUDED.status`,
-      [marketId, winner === "void" ? null : winner, user.user_id, note || null, status],
+      [marketId, winner === "void" ? null : winner, resolvedBy, note || null, status],
     );
     return { status, traders: byUser.size, paidOut: credits.reduce((a, x) => a + x, 0) };
   });

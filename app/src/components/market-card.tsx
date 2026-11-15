@@ -1,6 +1,7 @@
 import { fmtDate } from "@/core/time";
 import Link from "next/link";
 import type { Market } from "@/server/markets";
+import { GameBadgeChip } from "./game-badge";
 import { CourseIcon, Gauge, fmtClout } from "./ui";
 
 const closes = (iso: string) => fmtDate(iso);
@@ -18,6 +19,11 @@ export function MarketCard({ m, smartGap }: { m: Market; smartGap?: number }) {
         </Link>
         {binary && <Gauge p={m.outcomes[0].price} />}
       </div>
+      {m.game && (
+        <div className="mt-2">
+          <GameBadgeChip g={m.game} />
+        </div>
+      )}
 
       {binary ? (
         <div className="mt-auto grid grid-cols-2 gap-2 pt-4">

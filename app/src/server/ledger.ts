@@ -1,5 +1,5 @@
 import "server-only";
-import { connection } from "next/server";
+import { requestScope } from "./background";
 import { Pool, type PoolClient } from "pg";
 import { config, dbx } from "./databricks";
 
@@ -63,14 +63,14 @@ async function buildPool(): Promise<Pool> {
 }
 
 export async function q<T = Record<string, unknown>>(sql: string, params: unknown[] = []): Promise<T[]> {
-  await connection();
+  await requestScope();
   const p = await getPool();
   const r = await p.query(sql, params);
   return r.rows as T[];
 }
 
 export async function tx<T>(fn: (c: PoolClient) => Promise<T>): Promise<T> {
-  await connection();
+  await requestScope();
   const c = await (await getPool()).connect();
   try {
     await c.query("BEGIN");

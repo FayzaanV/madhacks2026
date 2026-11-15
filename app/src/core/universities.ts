@@ -1,6 +1,14 @@
 import data from "./universities.json";
 
-export type University = { school_id: string; name: string; short_name: string; domain: string; color: string };
+export type University = {
+  school_id: string;
+  name: string;
+  short_name: string;
+  domain: string;
+  color: string;
+  conference?: string;
+  espn_id?: string; // same id in every ESPN college sport (sports poller)
+};
 
 export const UNIVERSITIES: University[] = data.universities;
 export const OTHER_SCHOOL = "other";

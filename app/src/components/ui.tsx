@@ -6,11 +6,16 @@ const ICON_COLORS = ["#7c3aed", "#9333ea", "#c026d3", "#6366f1", "#8b5cf6", "#a8
 export const colorFor = (key: string) => ICON_COLORS[[...key].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) >>> 0, 7) % ICON_COLORS.length];
 
 /** Square course badge with initials, color hashed from the course name. */
+const SPORT_BADGE: Record<string, string> = {
+  Football: "FB", "Men's Basketball": "MBB", "Women's Basketball": "WBB", "Men's Hockey": "MHK",
+  "Women's Hockey": "WHK", Volleyball: "VB",
+};
+
 export function CourseIcon({ course, size = 36 }: { course: string; size?: number }) {
   const label =
     course === "campus"
       ? "UW"
-      : course
+      : SPORT_BADGE[course] ?? (course.startsWith("IM ") ? "IM" : null) ?? course
           .replace(/[^A-Za-z0-9 ]/g, "")
           .split(" ")
           .map((w, i) => (i === 0 ? w.slice(0, 2) : w.slice(0, 3)))

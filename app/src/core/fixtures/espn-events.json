@@ -1,0 +1,370 @@
+{
+ "_comment": "Trimmed real ESPN scoreboard events (Nov 13-14 2026) for app/src/core/sports.test.ts; 'postponed' is a real event with its status edited.",
+ "football_final": {
+  "sport": "football",
+  "event": {
+   "id": "401858520",
+   "date": "2026-11-14T17:00Z",
+   "name": "Wisconsin Badgers at Maryland Terrapins",
+   "shortName": "WIS @ MD",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "detail": "Final",
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401858520",
+     "date": "2026-11-14T17:00Z",
+     "odds": [],
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "24",
+       "winner": true,
+       "linescores": [
+        {
+         "value": 0.0
+        },
+        {
+         "value": 7.0
+        },
+        {
+         "value": 7.0
+        },
+        {
+         "value": 10.0
+        }
+       ],
+       "team": {
+        "id": "120",
+        "displayName": "Maryland Terrapins",
+        "abbreviation": "MD",
+        "location": "Maryland",
+        "shortDisplayName": "Maryland"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "21",
+       "winner": false,
+       "linescores": [
+        {
+         "value": 7.0
+        },
+        {
+         "value": 3.0
+        },
+        {
+         "value": 3.0
+        },
+        {
+         "value": 8.0
+        }
+       ],
+       "team": {
+        "id": "275",
+        "displayName": "Wisconsin Badgers",
+        "abbreviation": "WIS",
+        "location": "Wisconsin",
+        "shortDisplayName": "Wisconsin"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "football_live": {
+  "sport": "football",
+  "event": {
+   "id": "401858521",
+   "date": "2026-11-14T22:30Z",
+   "name": "Washington Huskies at Michigan State Spartans",
+   "shortName": "WASH @ MSU",
+   "status": {
+    "period": 4,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_IN_PROGRESS",
+     "state": "in",
+     "completed": false,
+     "detail": "End of 4th Quarter",
+     "shortDetail": "End of 4th"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401858521",
+     "date": "2026-11-14T22:30Z",
+     "odds": [],
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "14",
+       "winner": null,
+       "linescores": [
+        {
+         "value": 7.0
+        },
+        {
+         "value": 7.0
+        },
+        {
+         "value": 0.0
+        },
+        {
+         "value": 0.0
+        }
+       ],
+       "team": {
+        "id": "127",
+        "displayName": "Michigan State Spartans",
+        "abbreviation": "MSU",
+        "location": "Michigan State",
+        "shortDisplayName": "Michigan St"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "21",
+       "winner": null,
+       "linescores": [
+        {
+         "value": 7.0
+        },
+        {
+         "value": 7.0
+        },
+        {
+         "value": 0.0
+        },
+        {
+         "value": 7.0
+        }
+       ],
+       "team": {
+        "id": "264",
+        "displayName": "Washington Huskies",
+        "abbreviation": "WASH",
+        "location": "Washington",
+        "shortDisplayName": "Washington"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "hockey_ot_final": {
+  "sport": "mens-hockey",
+  "event": {
+   "id": "401913578",
+   "date": "2026-11-14T20:00Z",
+   "name": "Northeastern Huskies at UConn Huskies",
+   "shortName": "NE @ CONN",
+   "status": {
+    "period": 4,
+    "displayClock": "3:21",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "detail": "Final/OT",
+     "shortDetail": "Final/OT"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401913578",
+     "date": "2026-11-14T20:00Z",
+     "odds": [],
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "3",
+       "winner": false,
+       "linescores": [
+        {
+         "value": 0.0
+        },
+        {
+         "value": 0.0
+        },
+        {
+         "value": 3.0
+        },
+        {
+         "value": 0.0
+        }
+       ],
+       "team": {
+        "id": "41",
+        "displayName": "UConn Huskies",
+        "abbreviation": "CONN",
+        "location": "UConn",
+        "shortDisplayName": "UConn"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "4",
+       "winner": true,
+       "linescores": [
+        {
+         "value": 3.0
+        },
+        {
+         "value": 0.0
+        },
+        {
+         "value": 0.0
+        },
+        {
+         "value": 1.0
+        }
+       ],
+       "team": {
+        "id": "111",
+        "displayName": "Northeastern Huskies",
+        "abbreviation": "NE",
+        "location": "Northeastern",
+        "shortDisplayName": "Northeastern"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "basketball_final": {
+  "sport": "mens-basketball",
+  "event": {
+   "id": "401906772",
+   "date": "2026-11-14T00:00Z",
+   "name": "Merrimack Warriors at Florida Gators",
+   "shortName": "MRMK @ FLA",
+   "status": {
+    "period": 2,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_FINAL",
+     "state": "post",
+     "completed": true,
+     "detail": "Final",
+     "shortDetail": "Final"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401906772",
+     "date": "2026-11-14T00:00Z",
+     "odds": [],
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "83",
+       "winner": true,
+       "linescores": [
+        {
+         "value": 43.0
+        },
+        {
+         "value": 40.0
+        }
+       ],
+       "team": {
+        "id": "57",
+        "displayName": "Florida Gators",
+        "abbreviation": "FLA",
+        "location": "Florida",
+        "shortDisplayName": "Florida"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "54",
+       "winner": false,
+       "linescores": [
+        {
+         "value": 26.0
+        },
+        {
+         "value": 28.0
+        }
+       ],
+       "team": {
+        "id": "2771",
+        "displayName": "Merrimack Warriors",
+        "abbreviation": "MRMK",
+        "location": "Merrimack",
+        "shortDisplayName": "Merrimack"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ },
+ "postponed": {
+  "sport": "football",
+  "event": {
+   "id": "fixture-postponed",
+   "date": "2026-11-14T22:30Z",
+   "name": "Washington Huskies at Michigan State Spartans",
+   "shortName": "WASH @ MSU",
+   "status": {
+    "period": 0,
+    "displayClock": "0:00",
+    "type": {
+     "name": "STATUS_POSTPONED",
+     "state": "post",
+     "completed": false,
+     "detail": "Postponed",
+     "shortDetail": "Postponed"
+    }
+   },
+   "competitions": [
+    {
+     "id": "401858521",
+     "date": "2026-11-14T22:30Z",
+     "odds": [],
+     "competitors": [
+      {
+       "homeAway": "home",
+       "score": "0",
+       "winner": null,
+       "linescores": [],
+       "team": {
+        "id": "127",
+        "displayName": "Michigan State Spartans",
+        "abbreviation": "MSU",
+        "location": "Michigan State",
+        "shortDisplayName": "Michigan St"
+       }
+      },
+      {
+       "homeAway": "away",
+       "score": "0",
+       "winner": null,
+       "linescores": [],
+       "team": {
+        "id": "264",
+        "displayName": "Washington Huskies",
+        "abbreviation": "WASH",
+        "location": "Washington",
+        "shortDisplayName": "Washington"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ }
+}

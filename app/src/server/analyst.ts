@@ -65,6 +65,15 @@ async function buildContext(marketId: string) {
         course: market.course,
         closes_at: market.closes_at,
         resolution_source: market.resolution_source,
+        // Sports / intramural markets: the game's live or final score (trading closes at the start; it auto-resolves).
+        game: market.game && {
+          kind: market.game.kind,
+          state: market.game.state,
+          detail: market.game.detail,
+          away: `${market.game.away} ${market.game.away_score ?? ""}`.trim(),
+          home: `${market.game.home} ${market.game.home_score ?? ""}`.trim(),
+          starts_at: market.game.starts_at,
+        },
         data_is_simulated: market.is_simulated,
         live_crowd_prices: market.outcomes.map((o) => ({ outcome: o.label, crowd: +o.price.toFixed(3) })),
         smart_money_from_gold: sm.map((s) => ({ outcome: s.label, smart_money: s.smart_price && +s.smart_price.toFixed(3) })),

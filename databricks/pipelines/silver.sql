@@ -31,6 +31,7 @@ CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.markets
 COMMENT 'Markets with resolution and outcome count'
 AS SELECT m.market_id, m.school_id, m.course, m.question, m.market_type, m.status, m.liquidity_b,
           m.creator_id, m.resolution_source, m.created_at, m.opens_at, m.closes_at, m.is_simulated,
+          COALESCE(m.category, 'academic') AS category, m.sport, m.event_ref, m.market_kind, m.line,
           r.winning_outcome_index, r.resolved_at, r.resolved_by,
           r.winning_outcome_index IS NOT NULL AND m.status IN ('resolved', 'final') AS is_resolved,
           o.n_outcomes

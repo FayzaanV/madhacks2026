@@ -175,3 +175,38 @@ AS SELECT u.user_id, u.handle, u.is_simulated, u.ledger_clout, c.available AS go
           u.ledger_clout - c.available AS drift
 FROM the_curve.silver.users u JOIN the_curve.gold.user_clout c USING (user_id)
 WHERE ABS(u.ledger_clout - c.available) > 0.01;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.sports_market_accuracy
+COMMENT 'Sports + intramural markets: how well the crowd closing price predicted results, by sport and market kind (binary markets)'
+AS WITH closing AS (
+  SELECT m.market_id, m.category, m.sport, m.market_kind, m.winning_outcome_index,
+         COALESCE(MAX_BY(t.prices_after[0], t.created_at), 0.5) AS p_yes_close,
+         COUNT(t.trade_id) AS n_trades
+  FROM the_curve.silver.markets m
+  LEFT JOIN the_curve.silver.trades_enriched t ON t.market_id = m.market_id AND t.created_at <= m.closes_at
+  WHERE m.category IN ('sports', 'intramural') AND m.is_resolved AND m.n_outcomes = 2
+  GROUP BY m.market_id, m.category, m.sport, m.market_kind, m.winning_outcome_index
+)
+SELECT category, sport, market_kind, COUNT(*) AS markets, SUM(n_trades) AS trades,
+       AVG(POW(p_yes_close - CAST(winning_outcome_index = 0 AS INT), 2)) AS crowd_brier,
+       AVG(CAST((p_yes_close > 0.5) = (winning_outcome_index = 0) AS INT)) AS crowd_hit_rate
+FROM closing GROUP BY category, sport, market_kind;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.im_standings
+COMMENT 'Intramural standings from confirmed results (final or forfeit)'
+AS WITH g AS (
+  SELECT league_id, home_team_id, away_team_id, home_score, away_score FROM the_curve.bronze.im_games_raw
+  WHERE status IN ('final', 'forfeit')
+), side AS (
+  SELECT league_id, home_team_id AS team_id, home_score AS pts_for, away_score AS pts_against FROM g
+  UNION ALL SELECT league_id, away_team_id, away_score, home_score FROM g
+)
+SELECT l.league_id, l.sport, l.season, t.team_id, t.name,
+       COALESCE(SUM(CASE WHEN s.pts_for > s.pts_against THEN 1 ELSE 0 END), 0) AS wins,
+       COALESCE(SUM(CASE WHEN s.pts_for < s.pts_against THEN 1 ELSE 0 END), 0) AS losses,
+       COALESCE(SUM(CASE WHEN s.pts_for = s.pts_against THEN 1 ELSE 0 END), 0) AS ties,
+       COALESCE(SUM(s.pts_for), 0) - COALESCE(SUM(s.pts_against), 0) AS point_diff
+FROM the_curve.bronze.im_teams_raw t
+JOIN the_curve.bronze.im_leagues_raw l ON l.league_id = t.league_id
+LEFT JOIN side s ON s.team_id = t.team_id
+GROUP BY l.league_id, l.sport, l.season, t.team_id, t.name;

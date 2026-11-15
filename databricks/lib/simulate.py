@@ -164,6 +164,7 @@ def simulate(seed: int = 42, n_users: int = 2000, n_trades: int = 20000, b: floa
             "market_id": mid, "school_id": SCHOOL, "course": course, "question": question,
             "market_type": "binary" if n == 2 else ("numeric_range" if labels[0][0].isdigit() or "Below" in labels[0] or "Under" in labels[0] else "multiple_choice"),
             "status": "live" if live else "final",
+            "category": "academic", "auto_resolve": False,
             "liquidity_b": b,
             "creator_id": None,  # filled below
             "resolution_source": "https://registrar.wisc.edu" if course != "campus" else "https://uwbadgers.com",

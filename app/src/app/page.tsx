@@ -34,6 +34,8 @@ function BoardSkeleton() {
 
 function matches(m: Market, cat: string, q: string, gapOf: Map<string, number>) {
   if (q && !`${m.question} ${m.course}`.toLowerCase().includes(q.toLowerCase())) return false;
+  // Sports and intramural markets (hundreds, auto-created) live on /sports and /intramurals; search still finds them.
+  if (!q && (m.category === "sports" || m.category === "intramural")) return false;
   if (!cat) return true;
   if (cat === "mispriced") return (gapOf.get(m.market_id) ?? 0) >= 0.1;
   if (cat === "closing") return Date.parse(m.closes_at) - Date.now() < 864e5; // open markets closing within 24h
@@ -137,6 +139,11 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
         <div className="mb-3 flex items-baseline gap-3">
           <h2 className="text-xl font-bold">{q ? `Results for “${q}”` : "All markets"}</h2>
           <span className="text-sm text-muted">{shown.length} live</span>
+          {!q && (
+            <Link href="/sports" className="ml-auto text-sm font-semibold text-accent">
+              {markets.filter((m) => m.category === "sports").length} sports markets →
+            </Link>
+          )}
         </div>
         {shown.length === 0 ? (
           <p className="rounded-2xl border border-line bg-panel p-8 text-center text-muted">No markets match. Try another category.</p>

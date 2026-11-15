@@ -31,6 +31,8 @@ TABLES = {  # postgres table -> bronze table
     "course_staff": "course_staff_raw",
     "venues": "venues_raw", "market_rules": "market_rules_raw",  # partners (API key hashes) are never synced
     "venue_metrics": "venue_metrics_raw", "venue_reports": "venue_reports_raw",
+    "sports_games": "sports_games_raw",  # ESPN games the app's sports poller tracks (poller_leases is not synced)
+    "im_leagues": "im_leagues_raw", "im_teams": "im_teams_raw", "im_games": "im_games_raw",
 }
 APPEND_ONLY = {  # table -> primary key columns
     "trades": ["trade_id"], "ai_questions": ["question_id"], "venue_reports": ["report_id"],

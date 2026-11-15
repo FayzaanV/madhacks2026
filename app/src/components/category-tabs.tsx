@@ -8,6 +8,8 @@ const CATS: { key: string; label: string; href?: string }[] = [
   { key: "", label: "Trending" },
   { key: "mispriced", label: "Smart Money alerts" },
   { key: "campus", label: "Campus" },
+  { key: "sports", label: "Sports", href: "/sports" },
+  { key: "intramurals", label: "Intramurals", href: "/intramurals" },
   { key: "union", label: "Union", href: "/union" },
   { key: "CS", label: "Comp Sci" },
   { key: "Econ", label: "Econ" },
@@ -21,7 +23,8 @@ const CATS: { key: string; label: string; href?: string }[] = [
 export function CategoryTabs() {
   const path = usePathname();
   const sp = useSearchParams();
-  const active = path === "/" ? (sp.get("cat") ?? "") : path.startsWith("/union") ? "union" : null;
+  const active =
+    path === "/" ? (sp.get("cat") ?? "") : (["union", "sports", "intramurals"].find((k) => path.startsWith(`/${k}`)) ?? null);
   return (
     <nav className="no-scrollbar mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-sm">
       {CATS.map((c) => (

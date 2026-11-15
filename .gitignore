@@ -228,3 +228,6 @@ out/
 .databricks/
 *.tsbuildinfo
 next-env.d.ts
+
+# Local Claude Code / preview config (personal; may hold test-only env)
+.claude/launch.json

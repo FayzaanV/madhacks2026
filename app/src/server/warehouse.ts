@@ -1,5 +1,5 @@
 import "server-only";
-import { connection } from "next/server";
+import { requestScope } from "./background";
 import { config, dbx } from "./databricks";
 
 type StatementResponse = {
@@ -31,7 +31,7 @@ export async function querySql<T = Record<string, unknown>>(
   params: Record<string, string | number> = {},
   { fresh = false }: { fresh?: boolean } = {},
 ): Promise<T[]> {
-  await connection();
+  await requestScope();
   const key = JSON.stringify([sql, params]);
   const hit = cache.get(key);
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.rows as Promise<T[]>;

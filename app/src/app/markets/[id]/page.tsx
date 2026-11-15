@@ -9,6 +9,7 @@ import { CommentList } from "@/components/comment-list";
 import { MarketTabs, ProfileLink } from "@/components/market-tabs";
 import { OddsChart } from "@/components/odds-chart";
 import { OutcomeRows, PickProvider } from "@/components/trade-context";
+import { LiveScore } from "@/components/live-score";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { getInsight } from "@/server/analyst";
 import { canResolve, getComments, getMarket } from "@/server/markets";
@@ -68,6 +69,14 @@ async function Market({
               <h1 className="mt-1 text-2xl font-bold leading-tight md:text-3xl">{market.question}</h1>
             </div>
           </header>
+
+          {market.game && (
+            <LiveScore
+              initial={market.game}
+              eventId={market.category === "sports" ? market.event_ref : null}
+              market={{ kind: market.market_kind, resolved: market.winning_outcome_index != null || market.status === "voided" }}
+            />
+          )}
 
           {market.winning_outcome_index != null ? (
             <div className="rounded-2xl border border-yes bg-yes-soft p-4 text-sm">

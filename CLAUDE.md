@@ -121,6 +121,41 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
 - **Partners:** admins create/revoke keys on `/partners` (key shown once). `GET /api/partner/forecasts` returns the crowd forecast; on Databricks the gold tables can be shared with Delta Sharing (if enabled on the workspace). Union staff see `/partners` via secret `the-curve/partner_emails`.
 - **Lakebase writes from jobs** run as whoever deployed last, who therefore needs a Lakebase Postgres role.
 
+## 2c. Varsity sports and intramurals (auto-resolving)
+**Varsity (Big Ten, from ESPN):**
+- **Source:** ESPN's public scoreboard JSON (`site.api.espn.com/apis/site/v2/sports/...`). It's unofficial and keyless and may change, so keep parsing in one place: `app/src/core/sports.ts`, tested against recorded events in `app/src/core/fixtures/espn-events.json`.
+- **Coverage:** football, men's and women's basketball, men's and women's hockey, and volleyball, for the 18 Big Ten schools. Their `espn_id` (the same id in every sport) is in `app/src/core/universities.json`.
+- **Markets per game:**
+  - winner;
+  - over/under (ESPN's line if given, else the two teams' season average, rounded to .5);
+  - winning margin (buckets per sport);
+  - overtime, except volleyball.
+  - Created 4 days ahead and phrased around the Big Ten team (the home team if both are). `category='sports'`, `event_ref` = ESPN event id, `auto_resolve=true`, created by `u-yomi-sports`.
+- **Trading closes at the scheduled start.** There's no in-game trading.
+- **Team props only:** no player props and no parlays (players are students).
+- **Settlement:** when ESPN marks the game final, `settleMarket` (same payout code as manual resolution) resolves each market as `u-yomi-sports`. Postponed or canceled games void the markets. A tie voids the winner and margin markets.
+- **The poller** (`app/src/server/pollers.ts`, started by `app/src/instrumentation.ts`) runs inside the app every 60 s:
+  - schedules hourly;
+  - live scoreboards only for sports with a game on. Use ESPN `groups=5` for football and `groups=7` for basketball; never `groups=50`, which silently drops games;
+  - create markets, settle finals, auto-confirm intramurals.
+  - A `poller_leases` row ensures only one instance runs: the deployed app or a teammate's `npm run dev`.
+  - Set `SPORTS_POLLER=0` to disable it locally.
+- **Pages and API:** the `/sports` page; `GET /api/sports/games`, `GET /api/sports/games/:id` (live score; market pages re-check every 30 s); admin `POST /api/sports/sync` to run a poller pass now.
+
+**Intramurals (UW Rec Well on FusionPlay):**
+- **FusionPlay has no public data or API.** It's login-only, and Innosoft's terms forbid copying. So:
+  - admins create a league on `/intramurals` and paste the schedule from FusionPlay as CSV (`date,time,home,away,location`, Central time);
+  - teams and a winner market per game (`category='intramural'`, `event_ref='im:<game_id>'`) are created automatically;
+  - admins assign each team's captain by Yomi email.
+- **After the game:** one captain reports the score, and the **other captain confirms**, which resolves the market as `u-yomi-im`. Or they dispute it, and an admin decides (final score, forfeit or cancel). An unanswered report **auto-confirms after 2 hours**.
+- **Captains can't trade their own game's market.** Rules are in `app/src/core/intramurals.ts`, with tests.
+- To replace manual setup later, ask imsports@recwell.wisc.edu for a results feed.
+
+**Databricks:**
+- `10_sync_bronze` copies `sports_games` and the `im_*` tables to bronze.
+- Gold adds `sports_market_accuracy` (crowd closing price vs result, by sport and market type) and `im_standings`.
+- The AI analyst sees the game's live or final score.
+
 ## 3. Secondary features (stretch — only after core works)
 
 - **Waitlist Odds:** multi-factor model (enrollment appointment time, credits/class standing, major and reserved seats, waitlist position, section size, historical drop rate, days to drop deadline, live market prices as an input). Trained and logged in MLflow.
@@ -187,6 +222,10 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
 | GET / POST | `/api/markets/:id/comments?before=` | – / ✓ | `{comments, next, total}`, 50 per page newest first / add |
 | DELETE | `/api/comments/:id` | ✓ | delete your own comment |
 | POST | `/api/markets/:id/ask` | ✓ | AI analyst (streamed text), 10/hour |
+| GET | `/api/sports/games`, `/api/sports/games/:id` | – | Big Ten games, live scores |
+| POST | `/api/sports/sync` | ✓ admin | run one sports/intramural poller pass now |
+| POST | `/api/intramurals/games/:id/report` · `/confirm` · `/dispute` | ✓ captain | intramural result flow |
+| POST | `/api/intramurals/leagues`, `/leagues/:id/import`, `/teams/:id/captain`, `/games/:id/result` | ✓ admin | intramural setup and decisions |
 | POST | `/api/markets/:id/resolve` | ✓ 500+ | `{outcome \| "void", rationale}` → pays out, starts refresh |
 Errors are `{ "error": "…" }` with 400/401/403/404/429. Route handlers are thin wrappers over `app/src/server/*`.
 

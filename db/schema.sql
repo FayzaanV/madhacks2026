@@ -273,3 +273,95 @@ CREATE TABLE IF NOT EXISTS partners (
 INSERT INTO users (user_id, handle, email, handle_chosen_at)
 VALUES ('u-yomi-union', 'yomi_union', 'union-bot@yomi.invalid', now())
 ON CONFLICT (user_id) DO NOTHING;
+
+-- ------------------------------------------------------------------ sports + intramurals (auto-resolving markets)
+-- Market metadata so pollers can find and settle their own markets. category: academic | sports | intramural | union.
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS category text NOT NULL DEFAULT 'academic';
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS sport text;
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS event_ref text;      -- ESPN event id, or 'im:<game_id>'
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS market_kind text;    -- winner | total | margin | overtime
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS line double precision; -- over/under line for 'total'
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS auto_resolve boolean NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS markets_event_kind_uidx ON markets (event_ref, market_kind) WHERE event_ref IS NOT NULL;
+CREATE INDEX IF NOT EXISTS markets_category_idx ON markets (category, status);
+
+-- Varsity games from ESPN's public scoreboard (Big Ten schools), refreshed by the app's sports poller.
+CREATE TABLE IF NOT EXISTS sports_games (
+  event_id        text PRIMARY KEY,                 -- ESPN event id
+  sport           text NOT NULL,                    -- key from app/src/core/sports.ts SPORTS
+  starts_at       timestamptz NOT NULL,
+  state           text NOT NULL,                    -- pre | in | post
+  status_name     text,                             -- ESPN status.type.name (STATUS_FINAL, STATUS_POSTPONED, ...)
+  completed       boolean NOT NULL DEFAULT false,
+  period          int,
+  clock           text,
+  detail          text,                             -- e.g. "Final/OT", "2nd 4:31"
+  home_name       text NOT NULL,
+  away_name       text NOT NULL,
+  home_abbr       text,
+  away_abbr       text,
+  home_espn_id    text,
+  away_espn_id    text,
+  home_school_id  text,                             -- our school_id when the team is a listed school
+  away_school_id  text,
+  home_score      double precision,
+  away_score      double precision,
+  winner_side     text,                             -- home | away | null
+  overtime        boolean,
+  ou_line         double precision,                 -- ESPN odds over/under when provided
+  updated_at      timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS sports_games_state_idx ON sports_games (state, starts_at);
+
+-- Intramurals: FusionPlay has no public data, so admins import schedules and captains report results.
+CREATE TABLE IF NOT EXISTS im_leagues (
+  league_id  text PRIMARY KEY,
+  school_id  text NOT NULL DEFAULT 'uw-madison',
+  sport      text NOT NULL,
+  season     text NOT NULL,
+  division   text,
+  created_by text REFERENCES users(user_id),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS im_teams (
+  team_id         text PRIMARY KEY,
+  league_id       text NOT NULL REFERENCES im_leagues(league_id) ON DELETE CASCADE,
+  name            text NOT NULL,
+  captain_user_id text REFERENCES users(user_id),
+  created_at      timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (league_id, name)
+);
+CREATE TABLE IF NOT EXISTS im_games (
+  game_id       text PRIMARY KEY,
+  league_id     text NOT NULL REFERENCES im_leagues(league_id) ON DELETE CASCADE,
+  home_team_id  text NOT NULL REFERENCES im_teams(team_id),
+  away_team_id  text NOT NULL REFERENCES im_teams(team_id),
+  starts_at     timestamptz NOT NULL,
+  location      text,
+  status        text NOT NULL DEFAULT 'scheduled'
+                CHECK (status IN ('scheduled', 'reported', 'disputed', 'final', 'forfeit', 'canceled')),
+  home_score    int,
+  away_score    int,
+  reported_by   text REFERENCES users(user_id),
+  reported_at   timestamptz,
+  confirmed_by  text REFERENCES users(user_id),
+  confirmed_at  timestamptz,
+  disputed_by   text REFERENCES users(user_id),
+  disputed_at   timestamptz,
+  dispute_note  text,
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS im_games_status_idx ON im_games (status, starts_at);
+
+-- System accounts that create and settle sports / intramural markets (not people, not simulated).
+INSERT INTO users (user_id, handle, email, handle_chosen_at)
+VALUES ('u-yomi-sports', 'yomi_sports', 'sports-bot@yomi.invalid', now()),
+       ('u-yomi-im', 'yomi_intramurals', 'im-bot@yomi.invalid', now())
+ON CONFLICT (user_id) DO NOTHING;
+
+-- Leases so only one app instance (deployed or a teammate's local dev server) runs a background poller at a time.
+CREATE TABLE IF NOT EXISTS poller_leases (
+  name        text PRIMARY KEY,
+  holder      text NOT NULL,
+  expires_at  timestamptz NOT NULL
+);
