@@ -1,7 +1,7 @@
 import "server-only";
 import { requestScope } from "./background";
 import { Pool, type PoolClient } from "pg";
-import { config, dbx } from "./databricks";
+import { config, dbx, localMode } from "./databricks";
 
 /**
  * Lakebase (managed Postgres) connection pool. The password is a short-lived Lakebase credential
@@ -42,6 +42,13 @@ function getPool(): Promise<Pool> {
 
 async function buildPool(): Promise<Pool> {
   const old = pool;
+  if (localMode()) {
+    // Plain Postgres (local dev without Databricks): no rotating credential.
+    pool = new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+    poolExpires = Number.POSITIVE_INFINITY;
+    if (old) void old.end().catch(() => {});
+    return pool;
+  }
   const [ep, me, cred] = await Promise.all([
     dbx<Endpoint>(`/api/2.0/postgres/${config.lakebaseEndpoint}`),
     // On Databricks Apps PGUSER is the service principal's client id; locally use our username.

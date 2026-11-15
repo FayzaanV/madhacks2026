@@ -10,6 +10,12 @@ import { promisify } from "node:util";
 const HOST = (process.env.DATABRICKS_HOST ?? "https://dbc-9eafb64f-74c3.cloud.databricks.com").replace(/\/$/, "");
 export const databricksHost = HOST.startsWith("http") ? HOST : `https://${HOST}`;
 
+/**
+ * Local mode: DATABASE_URL points the app at a plain Postgres (e.g. scripts/seed_local.py on localhost) and no
+ * Databricks is used at all. Gold-table reads come back empty, refresh jobs and the AI analyst are skipped.
+ */
+export const localMode = () => !!process.env.DATABASE_URL;
+
 let cached: { token: string; expires: number } | null = null;
 
 export async function databricksToken(): Promise<string> {

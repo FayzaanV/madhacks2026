@@ -1,5 +1,5 @@
 import "server-only";
-import { config, databricksHost, databricksToken } from "./databricks";
+import { config, databricksHost, databricksToken, localMode } from "./databricks";
 import { getComments, getMarket, smartMoney, TradeError } from "./markets";
 import { q } from "./ledger";
 import { querySql } from "./warehouse";
@@ -99,6 +99,7 @@ async function buildContext(marketId: string) {
  * Q&A to Lakebase (ai_questions), which the refresh job syncs into bronze for analysis.
  */
 export async function askAnalyst(marketId: string, userId: string, question: string): Promise<ReadableStream<Uint8Array>> {
+  if (localMode()) throw new TradeError("The AI analyst runs on Databricks, which isn't connected in local mode.", 503);
   // Every question is a Foundation Model call on our Free Edition quota; one user can't burn it for everyone.
   const used = (
     await q<{ n: number }>("SELECT count(*)::int AS n FROM ai_questions WHERE user_id = $1 AND created_at > now() - interval '1 hour'", [

@@ -1,6 +1,6 @@
 import "server-only";
 import { requestScope } from "./background";
-import { config, dbx } from "./databricks";
+import { config, dbx, localMode } from "./databricks";
 
 type StatementResponse = {
   statement_id: string;
@@ -32,6 +32,7 @@ export async function querySql<T = Record<string, unknown>>(
   { fresh = false }: { fresh?: boolean } = {},
 ): Promise<T[]> {
   await requestScope();
+  if (localMode()) return []; // no SQL warehouse in local mode: gold-backed sections render empty
   const key = JSON.stringify([sql, params]);
   const hit = cache.get(key);
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.rows as Promise<T[]>;

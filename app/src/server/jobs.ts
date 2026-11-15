@@ -1,5 +1,5 @@
 import "server-only";
-import { dbx } from "./databricks";
+import { dbx, localMode } from "./databricks";
 
 /**
  * Ask for a `yomi-refresh` run (Lakebase -> bronze -> silver/gold -> AI insights) so leaderboards catch up after a
@@ -23,7 +23,7 @@ async function refreshJobId(): Promise<number | null> {
 }
 
 export async function triggerRefresh(): Promise<number | null> {
-  if (process.env.REFRESH_ON_RESOLVE === "0") return null;
+  if (process.env.REFRESH_ON_RESOLVE === "0" || localMode()) return null;
   if (Date.now() - lastTriggered < COOLDOWN_MS) return null;
   try {
     const id = await refreshJobId();
