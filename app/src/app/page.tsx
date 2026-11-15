@@ -61,7 +61,7 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   ]);
   const leaders: Leader[] = board.top;
   // `shame` comes back lowest-first; show the five lowest with the highest of them on top, like the top list.
-  const bottom: Leader[] = [...board.shame].reverse();
+  const bottom: Leader[] = board.shame;
   const gapOf = new Map(gaps.map((g) => [g.market_id, g.gap]));
   const shown = markets.filter((m) => matches(m, cat, q, gapOf));
   const featured = !cat && !q ? (markets.find((m) => m.market_id === gaps[0]?.market_id) ?? markets[0]) : null;
