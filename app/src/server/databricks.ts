@@ -7,7 +7,7 @@ import { promisify } from "node:util";
  * - On Databricks Apps: the app's service principal (DATABRICKS_CLIENT_ID/SECRET, injected) via OAuth M2M.
  * - Locally: DATABRICKS_TOKEN if set, else the CLI's DEFAULT profile (`databricks auth token`).
  */
-const HOST = (process.env.DATABRICKS_HOST ?? "https://dbc-9eafb64f-74c3.cloud.databricks.com").replace(/\/$/, "");
+const HOST = (process.env.DATABRICKS_HOST ?? "https://dbc-a76cc260-1137.cloud.databricks.com").replace(/\/$/, "");
 export const databricksHost = HOST.startsWith("http") ? HOST : `https://${HOST}`;
 
 /**
@@ -55,7 +55,7 @@ export async function dbx<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 export const config = {
   catalog: process.env.DATABRICKS_CATALOG ?? "the_curve",
-  warehouseId: process.env.DATABRICKS_WAREHOUSE_ID ?? "d3933f49c3b5beb3",
+  warehouseId: process.env.DATABRICKS_WAREHOUSE_ID ?? "cba268733f96d335",
   aiModel: process.env.DATABRICKS_AI_MODEL ?? "databricks-meta-llama-3-3-70b-instruct",
   lakebaseEndpoint:
     process.env.LAKEBASE_ENDPOINT ?? "projects/the-curve-ledger/branches/production/endpoints/primary",

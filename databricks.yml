@@ -14,7 +14,7 @@ variables:
     default: the_curve
   warehouse_id:
     description: SQL warehouse the app and SQL tasks use (Serverless Starter Warehouse)
-    default: d3933f49c3b5beb3
+    default: cba268733f96d335
   ai_model:
     description: Foundation Model endpoint used by the AI market analyst
     default: databricks-meta-llama-3-3-70b-instruct
@@ -22,8 +22,10 @@ variables:
     description: Lakebase (managed Postgres) instance name
     default: the-curve-ledger
 
+# Moved 2026-11-15 to Rishon's Free Edition workspace after the original one (dbc-9eafb64f-74c3, Musa's) ran out
+# of compute quota. Everyone: `databricks auth login --host <this URL>` and deploy from an up-to-date main.
 workspace:
-  host: https://dbc-9eafb64f-74c3.cloud.databricks.com
+  host: https://dbc-a76cc260-1137.cloud.databricks.com
 
 targets:
   # dev = a personal sandbox (names prefixed with your user). It CANNOT include the yomi app or the shared
