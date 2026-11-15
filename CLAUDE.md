@@ -23,6 +23,7 @@ The Databricks base and a first version of the website are built and deployed (o
 - **Times:** everything is displayed in Madison time via `app/src/core/time.ts` (the server runs in UTC). The market form reads close times as Madison time. The board lists only open markets; closed-but-unsettled ones show under "Awaiting resolution".
 - **Selling + portfolio:** sell shares back to the LMSR any time before resolution (Buy/Sell toggle). Market pages have a live odds chart (Lakebase, every trade) with range buttons and a scrub slider, Smart Money dashed (gold), a "Your position" card, and Activity / Top holders tabs showing everyone's bets by @username. `/portfolio`: positions, P&L, trade history, Clout-over-time chart (gold `user_clout_history`).
 - **Profiles:** uploaded profile pictures (128px, in Lakebase, never synced to bronze) with an initials fallback; a title you pick from earned titles (Clout tiers in `core/titles.ts` + gold flair), shown in the header, comments and bets.
+- **Campus markets (auto-resolving):** admins make Yes/No markets under Campus that settle from data: **weather** (Madison daily high/low, rain, snow from Open-Meteo) and **rec-center crowding** (UW Rec Well live counts, 28 spaces at the Nick, Bakke and Camp Randall). Rec counts come in through a **laptop relay** because Free Edition Databricks can't reach the feed. See §2d.
 - **Not built yet:** market proposal/upvotes, disputes (an overturn would have to reverse the payouts), Fade button, Syllabus→Markets, Genie space, MLflow models, Waitlist Odds, Swap Chains.
 
 ### Databricks workspace and team access (set up 2026-11-14)
@@ -160,6 +161,23 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
 - Gold adds `sports_market_accuracy` (crowd closing price vs result, by sport and market type) and `im_standings`.
 - The AI analyst sees the game's live or final score.
 
+## 2d. Campus markets: weather + rec-center crowding (auto-resolving)
+
+Admins pick "How it resolves → Weather (auto) / Rec center crowd (auto)" on `/markets/new`. Markets are binary (outcome 0 = Yes), `course='campus'`, `category='campus'`, `market_kind` weather | facility, `auto_resolve=true`, rule JSON in `markets.auto_rule`. Settled by the system account `u-yomi-campus` through `settleMarket`; the rationale names the source and the value.
+- **Rules** (`app/src/core/auto-rules.ts`, tests in `auto-rules.test.ts`): trading must close by `latestClose(rule)` (start of that day / the check time); settles after `resolvableAt(rule)` (6 AM Madison the next day / 45 min after the check time).
+- **Weather:** Open-Meteo daily `temperature_2m_max|min`, `precipitation_sum`, `snowfall_sum` for Madison (°F, inches), free, no key. The `yomi-refresh` task `campus_weather` (`databricks/notebooks/20_campus_weather.py`) saves the value to Lakebase `weather_observations` once the day ends; the app settles from that row. Works fully on Databricks.
+- **Rec centers:** the public UW Rec Well widget (connect2mycloud.com) reads `goboardapi.azurewebsites.net/api/FacilityCount/GetCountsByAccount?AccountAPIKey=…` (public widget key; override `REC_COUNTS_KEY`). It only has current counts, so each count update is saved to Lakebase `facility_counts`. Settles from the update closest to the check time within 45 min; no usable count → waits for an admin (never auto-voided). Feed timestamps are Madison time with no zone (`parseChicagoLocal`).
+- **Poller:** `campusTick()` in `app/src/server/pollers.ts` runs `pollOnce()` (`server/campus-data.ts`) every 5 min in **every** instance, outside the sports lease (saving counts is idempotent; settling twice is refused). Admins: "Check data now" on the market page / `POST /api/campus/sync`. Off with `CAMPUS_POLLER=0`.
+- **Databricks:** `facility_counts` + `weather_observations` sync to bronze; `databricks/pipelines/campus.sql` (inside the isolated `yomi-union-pipeline`) builds `silver.facility_counts` → `gold.facility_busyness` (typical crowd by space, weekday 1=Sunday, hour), shown on rec markets next to the live count. Genie: "When is Nick Level 3 least busy on weekdays?"
+
+**Network limits (tested 2026-11-14 on Free Edition):** serverless notebooks reach Open-Meteo but **not** the rec feed; a test Databricks App could not reach outside sites at all. So weather is fetched by the job, and rec counts by a laptop.
+
+**Laptop relay (current setup for rec counts):** one teammate's laptop runs the app locally and keeps it running (Windows PowerShell: `cd app; npm run dev`; macOS/Linux: `cd app && npm run dev`, after `databricks auth login`). Its campus poller fetches the rec feed over the laptop's internet and saves counts to the shared Lakebase every 5 min; the deployed app shows them and settles from them. If the laptop is off, pages show the last saved count and rec markets wait for an admin.
+
+**Future improvement:** replace the laptop with an always-on relay, in order of effort: (1) a GitHub Actions cron (every 5 min) that fetches the feed and writes to Lakebase with a service principal secret; (2) host the app or a small relay outside Free Edition (paid workspaces can allow outbound access with network policies); (3) ask UW Rec Well for direct data access or a webhook, which also makes the data official.
+
+**Also check:** the sports poller (§2c) fetches ESPN from the app, which the test above suggests the deployed app can't reach either. The laptop relay runs that poller too, but only while it holds the sports lease.
+
 ## 3. Secondary features (stretch — only after core works)
 
 - **Waitlist Odds:** multi-factor model (enrollment appointment time, credits/class standing, major and reserved seats, waitlist position, section size, historical drop rate, days to drop deadline, live market prices as an input). Trained and logged in MLflow.
@@ -216,7 +234,7 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
 | GET | `/api/users/:id/avatar` | – | profile picture (cache forever; URLs carry `?v=`) |
 | DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
 | GET | `/api/markets?q=&status=` | – | markets with live prices |
-| POST | `/api/markets` | ✓ admin | `{question, course, market_type: "binary"\|"multiple_choice", outcomes?, closes_at, resolution_source?, liquidity_b?, not_about_a_student: true}` → `{marketId}` |
+| POST | `/api/markets` | ✓ admin | `{question, course, market_type: "binary"\|"multiple_choice", outcomes?, closes_at, resolution_source?, liquidity_b?, not_about_a_student: true, auto_rule?}` → `{marketId}` (`auto_rule`: §2d) |
 | POST | `/api/venues/:id/reports` | ✓ | `{metric: "wait_min"\|"line_len", value}` → student check-in (1 per venue per 15 min) |
 | POST | `/api/partner/metrics` | Bearer partner key | `[{venue_id, metric, value, observed_at}]` (≤ 1000) → `{accepted, duplicates}` |
 | GET | `/api/partner/forecasts` | Bearer partner key | crowd chance of Yes for your venues' Union markets, last 7 days |
@@ -230,6 +248,8 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
 | POST | `/api/sports/sync` | ✓ admin | run one sports/intramural poller pass now |
 | POST | `/api/intramurals/games/:id/report` · `/confirm` · `/dispute` | ✓ captain | intramural result flow |
 | POST | `/api/intramurals/leagues`, `/leagues/:id/import`, `/teams/:id/captain`, `/games/:id/result` | ✓ admin | intramural setup and decisions |
+| GET | `/api/campus/facilities` | – | current UW Rec Well counts (last saved, else the live feed) |
+| POST | `/api/campus/sync` | ✓ admin | save rec counts now and settle due campus markets |
 | POST | `/api/markets/:id/resolve` | ✓ 500+ | `{outcome \| "void", rationale}` → pays out, starts refresh |
 Errors are `{ "error": "…" }` with 400/401/403/404/429. Route handlers are thin wrappers over `app/src/server/*`.
 
@@ -292,9 +312,9 @@ Catalog: **`the_curve`**
 
 | Schema | Tables |
 |---|---|
-| `bronze` | `venues_raw`, `venue_metrics_raw`, `venue_reports_raw`, `market_rules_raw`, `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
-| `silver` | `venues`, `venue_metrics` (with Madison `local_ts`), `market_rules`, `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_clout_history` (true Clout after each sell/resolution, for the portfolio chart), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights`, `venue_baselines`, `union_forecasts`, `union_market_scores`, `union_accuracy` |
+| `bronze` | `facility_counts_raw`, `weather_observations_raw`, `venues_raw`, `venue_metrics_raw`, `venue_reports_raw`, `market_rules_raw`, `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
+| `silver` | `facility_counts` (campus.sql), `venues`, `venue_metrics` (with Madison `local_ts`), `market_rules`, `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
+| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_clout_history` (true Clout after each sell/resolution, for the portfolio chart), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights`, `venue_baselines`, `union_forecasts`, `union_market_scores`, `union_accuracy`, `facility_busyness` (rec crowd by space/weekday/hour, campus.sql) |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 
