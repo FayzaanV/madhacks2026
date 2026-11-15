@@ -1,16 +1,30 @@
 "use client";
 
 import { TimeChart, type Series } from "./time-chart";
+import type { ReactNode } from "react";
 
 const PALETTE = ["var(--accent)", "#22c55e", "#f59e0b", "#38bdf8"];
-const BINARY_COLORS = ["var(--yes)", "var(--no)"]; // Yes green, No red
+const BINARY_COLORS = ["var(--yes)", "var(--down)"]; // Yes green, No red
 const pct = (v: number | null) => (v == null ? "–" : `${Math.round(v * 100)}%`);
 
 /**
  * Market odds over time. Crowd odds are live from the Lakebase ledger (every trade); the dashed Smart Money
  * line comes from the gold pipeline. Binary markets chart both Yes and No; multiple choice charts the top 4 outcomes.
+ * `width` and `height` size the chart's drawing space (it always scales to fill its container).
  */
-export function OddsChart({ labels, points }: { labels: string[]; points: { t: number; p: number[]; smart: number | null }[] }) {
+export function OddsChart({
+  labels,
+  points,
+  width,
+  height,
+  action,
+}: {
+  labels: string[];
+  points: { t: number; p: number[]; smart: number | null }[];
+  width?: number;
+  height?: number;
+  action?: ReactNode;
+}) {
   const binary = labels.length === 2;
   const last = points.at(-1)?.p ?? [];
   const shown = binary ? [0, 1] : labels.map((_, i) => i).sort((a, b) => (last[b] ?? 0) - (last[a] ?? 0)).slice(0, 4);
@@ -28,15 +42,17 @@ export function OddsChart({ labels, points }: { labels: string[]; points: { t: n
       series={series}
       domain={[0, 1]}
       format={(v) => `${Math.round(v * 100)}%`}
+      width={width}
+      height={height}
       header={(values, t, start) => {
         const move = values[0] != null && start[0] != null ? Math.round((values[0] - start[0]) * 100) : null;
         return (
-          <div className="flex flex-wrap items-end gap-x-5 gap-y-1">
+          <div className={`flex flex-wrap items-end gap-x-5 gap-y-1 ${action ? "pb-2" : ""}`}>
             <div>
               <div className="tabular text-3xl font-bold" style={{ color: series[0]?.color }}>
                 {pct(values[0])} <span className="text-base font-medium text-muted">{binary ? "chance" : series[0]?.label}</span>
               </div>
-              <div className={`text-xs font-semibold ${move == null || move === 0 ? "text-muted" : move > 0 ? "text-yes" : "text-no"}`}>
+              <div className={`text-xs font-semibold ${move == null || move === 0 ? "text-muted" : move > 0 ? "text-yes" : "text-down"}`}>
                 {move == null ? "" : `${move > 0 ? "▲" : move < 0 ? "▼" : ""} ${Math.abs(move)} pts`} {t == null ? "this range" : "at scrubbed time"}
               </div>
             </div>
@@ -46,6 +62,7 @@ export function OddsChart({ labels, points }: { labels: string[]; points: { t: n
                 <b className="tabular">{pct(values[k + 1])}</b>
               </span>
             ))}
+            {action && <div className="ml-auto">{action}</div>}
           </div>
         );
       }}

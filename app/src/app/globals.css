@@ -1,22 +1,45 @@
 @import "tailwindcss";
 
-/* Yomi theme: light only, violet accent. (Dark mode was removed on purpose; don't add a prefers-color-scheme block.) */
+/* Yomi theme: light only, red accent on warm white. (Dark mode was removed on purpose; don't add a prefers-color-scheme block.)
+   Brand red (--accent) is chrome only: logo, primary CTAs, active tab, eyebrows.
+   Outcomes get their own colors so red never means "good" and "bad" at once:
+   --yes (green) / --no (slate ink) for outcomes, --down (red) for losses and negative deltas. */
 :root {
   color-scheme: light;
-  --bg: #f6f4fb;
+  --bg: #f6f5f3;
   --panel: #ffffff;
-  --panel-2: #f0ecf9;
-  --ink: #1b1530;
-  --muted: #6e6787;
-  --line: #e3ddf2;
-  --accent: #7c3aed;
+  --panel-2: #efedea;
+  --ink: #171717;
+  --muted: #6b6864;
+  --line: #e6e3df;
+  --accent: #d2363a;
   --accent-ink: #ffffff;
-  --accent-soft: #ede5ff;
-  --yes: #15803d;
-  --yes-soft: #dcf5e5;
-  --no: #c2283a;
-  --no-soft: #fbe2e5;
-  --smart: #a21caf;
+  --accent-soft: #fceaea;
+  --yes: #0f7a5c;
+  --yes-soft: #dcf2ea;
+  --no: #3f3f46;
+  --no-soft: #ececee;
+  --down: #b42318;
+  --down-soft: #fde8e6;
+  --smart: #171717;
+
+  /* Subject colors (course badges). One token per subject; see subjectColor() in ui.tsx. */
+  --subj-econ: #d2363a;
+  --subj-cs: #e8772e;
+  --subj-ds: #2f5fd0;
+  --subj-stat: #7a4fc0;
+  --subj-math: #0e7490;
+  --subj-chem: #4d7c0f;
+  --subj-psych: #be185d;
+  --subj-campus: #4b5563;
+  --subj-sports: #1f2937;
+  --subj-im: #b45309;
+  --subj-union: #0369a1;
+  --subj-other: #6b6864;
+
+  --radius-card: 1.25rem;
+  --shadow-card: 0 1px 2px rgb(23 23 23 / 0.04), 0 4px 16px rgb(23 23 23 / 0.04);
+  --shadow-pop: 0 8px 30px rgb(23 23 23 / 0.12);
 }
 
 @theme inline {
@@ -33,7 +56,12 @@
   --color-yes-soft: var(--yes-soft);
   --color-no: var(--no);
   --color-no-soft: var(--no-soft);
+  --color-down: var(--down);
+  --color-down-soft: var(--down-soft);
   --color-smart: var(--smart);
+  --radius-card: var(--radius-card);
+  --shadow-card: var(--shadow-card);
+  --shadow-pop: var(--shadow-pop);
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -42,6 +70,27 @@ body {
   background: var(--bg);
   color: var(--ink);
   font-family: var(--font-sans);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Headlines: heavy and tight, like the mock. */
+.display {
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 1.05;
+}
+
+/* Small red label above a section heading ("FEATURED MARKET"). */
+.eyebrow {
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
 .tabular {

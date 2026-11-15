@@ -2,7 +2,7 @@
 export function Clout({ value, className = "" }: { value: number; className?: string }) {
   const v = Math.round(value);
   return (
-    <span className={`tabular font-semibold ${v < 0 ? "text-no" : ""} ${className}`}>
+    <span className={`tabular font-semibold ${v < 0 ? "text-down" : ""} ${className}`}>
       {v.toLocaleString()} <span className="text-xs font-normal text-muted">Clout</span>
     </span>
   );
