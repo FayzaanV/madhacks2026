@@ -18,6 +18,9 @@ import { marketActivity, oddsSeries, positions, topHolders, type Position } from
 import { ResolveBox } from "@/components/resolve-box";
 import Link from "next/link";
 import { currentUser } from "@/server/user";
+import { ChallengeBox, DisputeBox, VetoBox } from "@/components/market-social";
+import { q } from "@/server/ledger";
+import { disputeState, listFriends, marketTags } from "@/server/social";
 import { RuleChart } from "@/components/rule-chart";
 import { marketRule, METRIC_LABEL } from "@/server/union";
 
@@ -54,6 +57,19 @@ async function Market({
   const outcomes = market.outcomes.map((o) => ({ index: o.outcome_index, label: o.label, price: o.price }));
   const holdings = market.outcomes.map((o) => mine.find((p) => p.outcome_index === o.outcome_index)?.shares ?? 0);
   const labels = market.outcomes.map((o) => o.label);
+  // Friends & groups: tags/veto, disputes, who may resolve, and friends to challenge.
+  const [tags, dispute, groupRole, friendList] = await Promise.all([
+    market.group_id ? marketTags(id) : Promise.resolve([]),
+    market.group_id ? disputeState(id, user?.user_id ?? null) : Promise.resolve(null),
+    market.group_id && user
+      ? q<{ role: string }>("SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2", [market.group_id, user.user_id]).then((r) => r[0]?.role ?? null)
+      : Promise.resolve(null),
+    user ? listFriends(user).then((f) => f.friends) : Promise.resolve([]),
+  ]);
+  const groupAdmin = groupRole === "owner" || groupRole === "admin";
+  const mayResolve = market.group_id ? groupAdmin || market.creator_id === user?.user_id : Boolean(user && canResolve(user));
+  const mayOverride = market.group_id ? groupAdmin : Boolean(user && isAdmin(user));
+  const taggedMe = tags.find((t) => t.user_id === user?.user_id && !t.vetoed);
 
   return (
     // Keyed so "Sell →" links (?side=sell&pick=i) reset the selected outcome and the Buy/Sell toggle.
@@ -66,9 +82,20 @@ async function Market({
               <div className="text-sm text-muted">
                 {market.course} · {market.market_type.replace("_", " ")}
                 {market.is_simulated && <span className="ml-2 rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent">simulated</span>}
+                {market.group_id && (
+                  <Link href={`/groups/${market.group_id}`} className="ml-2 rounded bg-panel-2 px-1.5 py-0.5 text-xs font-semibold hover:text-accent">
+                    🔒 {market.group_name}
+                  </Link>
+                )}
                 {market.status !== "live" && <span className="ml-2 rounded bg-panel-2 px-1.5 py-0.5 text-xs font-semibold">{market.status}</span>}
               </div>
               <h1 className="mt-1 text-2xl font-bold leading-tight md:text-3xl">{market.question}</h1>
+              {tags.length > 0 && (
+                <p className="mt-1 text-sm text-muted">
+                  About {tags.map((t) => `@${t.handle}`).join(", ")}
+                  {tags.some((t) => t.vetoed) && " · vetoed"}
+                </p>
+              )}
             </div>
           </header>
 
@@ -155,10 +182,20 @@ async function Market({
             initialSide={sp.side === "sell" ? "sell" : "buy"}
           />
           {mine.length > 0 && <YourPosition positions={mine} />}
-          {user && canResolve(user) && ["live", "closed"].includes(market.status) && (
+          {taggedMe && ["live", "closed"].includes(market.status) && <VetoBox marketId={id} />}
+          {mayResolve && ["live", "closed"].includes(market.status) && (
             <ResolveBox marketId={id} outcomes={outcomes} />
           )}
-          {user && isAdmin(user) && ["resolved", "final", "voided"].includes(market.status) && (
+          {user && dispute && <DisputeBox marketId={id} outcomes={outcomes} state={dispute} me={user.user_id} />}
+          {user && market.status === "live" && !market.past_close && (
+            <ChallengeBox
+              marketId={id}
+              outcomes={outcomes}
+              binary={binary}
+              friends={friendList} // the server checks a friend is in the group for group markets
+            />
+          )}
+          {mayOverride && ["resolved", "final", "voided", "disputed"].includes(market.status) && (
             <ResolveBox
               marketId={id}
               outcomes={outcomes}
@@ -222,7 +259,7 @@ async function Chart({ id, labels }: { id: string; labels: string[] }) {
   return (
     <section className="rounded-2xl border border-line bg-panel p-4">
       <OddsChart labels={labels} points={points} />
-      <p className="mt-2 text-xs text-muted">Odds live from the Lakebase ledger · Smart Money (dashed) from gold tables, refreshed every 15 min and after each resolution</p>
+      <p className="mt-2 text-xs text-muted">Odds live from the Lakebase ledger · Smart Money (dashed) from gold tables, updated on each Databricks refresh</p>
     </section>
   );
 }

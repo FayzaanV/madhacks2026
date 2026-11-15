@@ -5,6 +5,8 @@ import { currentUser } from "@/server/user";
 import { Avatar } from "./avatar";
 import { nameClass } from "./cosmetics";
 import { SignOutButton } from "./login-form";
+import { NotificationBell } from "./notification-bell";
+import { q } from "@/server/ledger";
 
 export async function UserChip() {
   const u = await currentUser();
@@ -21,8 +23,17 @@ export async function UserChip() {
       </Link>
     );
   const clout = Math.round(u.clout + u.open_stake);
+  const [{ n: unread }] = await q<{ n: number }>("SELECT count(*)::int AS n FROM notifications WHERE user_id = $1 AND read_at IS NULL", [
+    u.user_id,
+  ]).catch(() => [{ n: 0 }]);
   return (
     <span className="flex items-center gap-1">
+      <Link href="/friends" className="hidden rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-panel-2 hover:text-ink md:block">
+        Friends
+      </Link>
+      <Link href="/groups" className="hidden rounded-lg px-3 py-1.5 text-sm text-muted hover:bg-panel-2 hover:text-ink md:block">
+        Groups
+      </Link>
       {isAdmin(u) && (
         <Link href="/markets/new" className="hidden rounded-lg px-3 py-1.5 text-sm font-semibold text-accent hover:bg-panel-2 sm:block">
           + New market
@@ -45,6 +56,7 @@ export async function UserChip() {
           <span className="text-[11px] text-accent">{u.title ?? displayTitle(null, clout)}</span>
         </span>
       </Link>
+      <NotificationBell unread={unread} />
       <SignOutButton />
     </span>
   );
