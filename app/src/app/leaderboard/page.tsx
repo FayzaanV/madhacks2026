@@ -118,7 +118,6 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
         <Table title={title} rows={top} rankKey="rank" podium showSchool={!school} looks={looks} />
         <Table title="Hall of Shame" rows={shame} rankKey="rank_from_bottom" shame showSchool={!school} looks={looks} />
       </div>
-      <p className="text-xs text-muted">Computed by the Lakeflow pipeline into the_curve.gold.leaderboard and gold.school_rankings.</p>
     </>
   );
 }
