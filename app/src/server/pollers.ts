@@ -42,6 +42,8 @@ export async function tick(): Promise<Record<string, unknown> | null> {
       out.created = await sports.createMarkets();
       out.settled = await sports.settleFinished();
       out.imAutoConfirmed = await im.autoConfirmDue();
+      // Simulated test markets: settle closed ones and keep open ones moving (also pinged by /api/sim/tick).
+      out.test = await (await import("./testmarkets")).simTick();
       return out;
     });
   } catch (e) {

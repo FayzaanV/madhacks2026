@@ -1,7 +1,7 @@
 import "server-only";
 import type { PoolClient } from "pg";
 import { applySell, applyTrade, DEFAULT_B, prices, sellProceeds, sharesForProceeds } from "@/core/lmsr";
-import { canAfford, netCloutChange, privileges, sellBasis } from "@/core/clout";
+import { canAfford, overrideDeltas, privileges, sellBasis, settlementCredits, type Winner } from "@/core/clout";
 import { triggerRefresh } from "./jobs";
 import { openStakeSql, q, tx } from "./ledger";
 import { clearWarehouseCache, querySql } from "./warehouse";
@@ -303,59 +303,71 @@ export async function placeSell(userId: string, marketId: string, outcomeIndex: 
 
 /**
  * Resolve a market (or void it). One Postgres transaction that:
- *   - requires the resolve privilege (500+ true Clout = balance + open stake), or an ADMIN_EMAILS account
- *   - locks the market, records the resolution with a 24h dispute deadline, sets status resolved/voided
- *   - pays out: each winning share still held credits 1 Clout (cash already moved when trades were placed);
- *     a voided market reverses every trader's net cash flow (refunds stakes, takes back profit taken by selling)
- * Then kicks off the refresh job so gold (leaderboards, Brier, calibration) catches up within minutes.
- * Disputes are not built yet: a later overturn would need to reverse these credits.
+ *   - requires the resolve privilege (500+ true Clout = balance + open stake), or an admin
+ *   - locks the market (trades take it FOR SHARE, so none land mid-resolution), records the resolution with a
+ *     24h dispute deadline and sets status resolved/voided
+ *   - pays out with settlementCredits: each winning share still held credits 1 Clout; a voided market reverses
+ *     every trader's net cash flow
+ * Override (admins only): an already settled market can be re-resolved; balances move by only the difference
+ * between the new and old outcome (overrideDeltas), and the rationale keeps the previous outcome.
+ * Then kicks off the refresh job (unless refresh: false, for batches) so gold catches up within minutes.
  */
 export async function resolveMarket(
-  user: { user_id: string; email: string; clout: number; open_stake: number },
+  user: { user_id: string; email: string; handle?: string; clout: number; open_stake: number },
   marketId: string,
-  winner: number | "void",
+  winner: Winner,
   rationale: string,
+  { override = false }: { override?: boolean } = {},
 ) {
   if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
-  return settleMarket(marketId, winner, rationale, user.user_id);
+  if (override && !isAdmin(user)) throw new TradeError("Only admins can override a resolution.", 403);
+  return settleMarket(marketId, winner, rationale, user.user_id, { override, by: user.handle });
 }
 
 /**
  * Settle a market with no permission check: the payout transaction shared by manual resolution and the
- * auto-resolvers (sports poller as u-yomi-sports, intramurals as u-yomi-im). Callers decide who may settle.
+ * auto-resolvers (sports poller as u-yomi-sports, intramurals as u-yomi-im, test markets as their creator).
+ * Callers decide who may settle. `override` re-resolves a settled market (balances move by the difference);
+ * `refresh: false` skips the gold refresh so a batch can trigger one at the end.
  */
-export async function settleMarket(marketId: string, winner: number | "void", rationale: string, resolvedBy: string) {
+export async function settleMarket(
+  marketId: string,
+  winner: Winner,
+  rationale: string,
+  resolvedBy: string,
+  { override = false, refresh = true, by }: { override?: boolean; refresh?: boolean; by?: string } = {},
+) {
   const note = rationale.trim().slice(0, 1000);
   const out = await tx(async (c) => {
     const m = (await c.query("SELECT status FROM markets WHERE market_id = $1 FOR UPDATE", [marketId])).rows[0];
     if (!m) throw new TradeError("Market not found.", 404);
-    if (!["live", "closed"].includes(m.status)) throw new TradeError(`This market is already ${m.status}.`, 409);
+    const settled = ["resolved", "final", "voided"].includes(m.status);
+    if (settled && !override) throw new TradeError(`This market is already ${m.status}.`, 409);
+    if (!settled && !["live", "closed"].includes(m.status)) throw new TradeError(`This market is ${m.status}.`, 409);
     const n = (await c.query("SELECT count(*)::int AS n FROM outcomes WHERE market_id = $1", [marketId])).rows[0].n as number;
     if (winner !== "void" && !(Number.isInteger(winner) && winner >= 0 && winner < n)) throw new TradeError("Unknown outcome.");
 
-    const rows = (
-      await c.query("SELECT user_id, outcome_index, clout_spent, shares FROM trades WHERE market_id = $1", [marketId])
-    ).rows as { user_id: string; outcome_index: number; clout_spent: number; shares: number }[];
-    const byUser = new Map<string, [number, number, number][]>();
-    for (const r of rows) byUser.set(r.user_id, [...(byUser.get(r.user_id) ?? []), [r.outcome_index, r.clout_spent, r.shares]]);
-    // Signed trades (sells are negative): payout = net winning shares held; void = net Clout put in, which is
-    // negative if someone sold for more than they paid, so voiding takes that profit back.
-    const ids: string[] = [];
-    const credits: number[] = [];
-    for (const [id, trades] of byUser) {
-      const spent = trades.reduce((a, [, s]) => a + s, 0);
-      const credit = winner === "void" ? spent : netCloutChange(trades, winner) + spent;
-      if (Math.abs(credit) > 1e-9) {
-        ids.push(id);
-        credits.push(credit);
-      }
+    let previous: Winner | null = null;
+    if (settled) {
+      const r = (await c.query("SELECT winning_outcome_index FROM resolutions WHERE market_id = $1", [marketId])).rows[0];
+      previous = m.status === "voided" || r?.winning_outcome_index == null ? "void" : (r.winning_outcome_index as number);
+      if (previous === winner) throw new TradeError("That's already the outcome.", 409);
     }
+    const trades = (
+      await c.query("SELECT user_id, outcome_index, clout_spent, shares FROM trades WHERE market_id = $1", [marketId])
+    ).rows.map((r) => [r.user_id, r.outcome_index, r.clout_spent, r.shares] as const);
+    const moves = previous === null ? settlementCredits(trades, winner) : overrideDeltas(trades, previous, winner);
     await c.query(
       `UPDATE users u SET clout = u.clout + x.credit
        FROM unnest($1::text[], $2::float8[]) AS x(user_id, credit) WHERE u.user_id = x.user_id`,
-      [ids, credits],
+      [[...moves.keys()], [...moves.values()]],
     );
     const status = winner === "void" ? "voided" : "resolved";
+    const label = (w: Winner) => (w === "void" ? "void" : `outcome ${w + 1}`);
+    const why =
+      previous === null
+        ? note || null
+        : `Overridden by @${by ?? resolvedBy} (was ${label(previous)})${note ? `: ${note}` : ""}`;
     await c.query("UPDATE markets SET status = $2 WHERE market_id = $1", [marketId, status]);
     await c.query(
       `INSERT INTO resolutions (market_id, winning_outcome_index, resolved_by, rationale, resolved_at, dispute_deadline, status)
@@ -363,12 +375,17 @@ export async function settleMarket(marketId: string, winner: number | "void", ra
        ON CONFLICT (market_id) DO UPDATE SET winning_outcome_index = EXCLUDED.winning_outcome_index,
          resolved_by = EXCLUDED.resolved_by, rationale = EXCLUDED.rationale, resolved_at = now(),
          dispute_deadline = EXCLUDED.dispute_deadline, final_at = NULL, status = EXCLUDED.status`,
-      [marketId, winner === "void" ? null : winner, resolvedBy, note || null, status],
+      [marketId, winner === "void" ? null : winner, resolvedBy, why, status],
     );
-    return { status, traders: byUser.size, paidOut: credits.reduce((a, x) => a + x, 0) };
+    return {
+      status,
+      overridden: previous !== null,
+      traders: new Set(trades.map((t) => t[0])).size,
+      paidOut: [...moves.values()].reduce((a, x) => a + x, 0),
+    };
   });
   clearWarehouseCache();
-  const refreshRunId = await triggerRefresh();
+  const refreshRunId = refresh ? await triggerRefresh() : null;
   return { ...out, refreshRunId };
 }
 

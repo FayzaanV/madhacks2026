@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { MarketForm } from "@/components/market-form";
+import { TestMarketTools } from "@/components/test-market-tools";
 import { isAdmin } from "@/server/markets";
 import { currentUser } from "@/server/user";
 
@@ -22,6 +23,7 @@ async function NewMarket() {
       <h1 className="text-2xl font-bold">New market</h1>
       <p className="text-sm text-muted">Goes live immediately. Every outcome starts at an equal price.</p>
       <MarketForm />
+      <TestMarketTools />
     </div>
   );
 }

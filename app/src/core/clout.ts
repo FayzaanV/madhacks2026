@@ -47,3 +47,35 @@ export function netCloutChange(trades: readonly (readonly [number, number, numbe
   }
   return won - spent;
 }
+
+export type Winner = number | "void";
+
+/**
+ * Balance credit per user when a market settles. trades: [userId, outcomeIndex, cloutSpent, shares], signed (sells
+ * negative). Payout = net winning shares held; void = net Clout put in (negative if they sold at a profit).
+ * Mirror of databricks/lib/union.py credits.
+ */
+export function settlementCredits(trades: readonly (readonly [string, number, number, number])[], winner: Winner): Map<string, number> {
+  const byUser = new Map<string, [number, number, number][]>();
+  for (const [u, o, spent, shares] of trades) byUser.set(u, [...(byUser.get(u) ?? []), [o, spent, shares]]);
+  const out = new Map<string, number>();
+  for (const [u, ts] of byUser) {
+    const spent = ts.reduce((a, [, s]) => a + s, 0);
+    const credit = winner === "void" ? spent : netCloutChange(ts, winner) + spent;
+    if (Math.abs(credit) > 1e-9) out.set(u, credit);
+  }
+  return out;
+}
+
+/** Overriding a resolution: each user's balance moves by (new credit - old credit). */
+export function overrideDeltas(trades: readonly (readonly [string, number, number, number])[], from: Winner, to: Winner): Map<string, number> {
+  const before = settlementCredits(trades, from);
+  const after = settlementCredits(trades, to);
+  const out = new Map<string, number>();
+  for (const u of new Set([...before.keys(), ...after.keys()])) {
+    const d = (after.get(u) ?? 0) - (before.get(u) ?? 0);
+    if (Math.abs(d) > 1e-9) out.set(u, d);
+  }
+  return out;
+}
+

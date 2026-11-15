@@ -18,6 +18,7 @@ const CATS: { key: string; label: string; href?: string }[] = [
   { key: "Chem", label: "Chem" },
   { key: "Psych", label: "Psych" },
   { key: "closing", label: "Closing soon" },
+  { key: "Test", label: "Test markets" },
 ];
 
 export function CategoryTabs() {

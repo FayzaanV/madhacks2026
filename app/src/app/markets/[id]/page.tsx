@@ -12,7 +12,7 @@ import { OutcomeRows, PickProvider } from "@/components/trade-context";
 import { LiveScore } from "@/components/live-score";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { getInsight } from "@/server/analyst";
-import { canResolve, getComments, getMarket } from "@/server/markets";
+import { canResolve, getComments, getMarket, isAdmin } from "@/server/markets";
 import { marketActivity, oddsSeries, positions, topHolders, type Position } from "@/server/portfolio";
 import { ResolveBox } from "@/components/resolve-box";
 import Link from "next/link";
@@ -139,6 +139,14 @@ async function Market({
           {mine.length > 0 && <YourPosition positions={mine} />}
           {user && canResolve(user) && ["live", "closed"].includes(market.status) && (
             <ResolveBox marketId={id} outcomes={outcomes} />
+          )}
+          {user && isAdmin(user) && ["resolved", "final", "voided"].includes(market.status) && (
+            <ResolveBox
+              marketId={id}
+              outcomes={outcomes}
+              override
+              current={market.winning_outcome_index != null ? `${labels[market.winning_outcome_index]} won` : "voided"}
+            />
           )}
           {user ? (
             <div className="rounded-2xl border border-line bg-panel p-4 text-sm">

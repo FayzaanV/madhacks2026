@@ -81,3 +81,64 @@ describe("properties", () => {
     expect(canAfford(100, 101)).toBe(false);
   });
 });
+
+describe("Madison time", () => {
+  it("formats a UTC instant in Central time", async () => {
+    const { fmtDateTime, fromMadison, madisonAt } = await import("./time");
+    expect(fmtDateTime("2026-11-15T01:33:00Z")).toBe("Nov 14, 7:33 PM CT"); // CST, UTC-6
+    expect(fmtDateTime("2026-07-04T23:00:00Z")).toBe("Jul 4, 6:00 PM CT"); // CDT, UTC-5
+    expect(fromMadison("2026-11-14T19:30").toISOString()).toBe("2026-11-15T01:30:00.000Z");
+    expect(fromMadison("2026-07-04T18:00").toISOString()).toBe("2026-07-04T23:00:00.000Z");
+    expect(madisonAt(new Date("2026-11-15T01:33:00Z"), 23, 30).toISOString()).toBe("2026-11-15T05:30:00.000Z");
+  });
+});
+
+describe("test markets", () => {
+  it("closes every 30 min tonight, or spreads over 3h when late", async () => {
+    const { closeTimes } = await import("./testmarkets");
+    const evening = closeTimes(new Date("2026-11-15T00:05:00Z"), 8); // 6:05pm CT
+    expect(evening[0].toISOString()).toBe("2026-11-15T00:30:00.000Z");
+    expect(evening[7].toISOString()).toBe("2026-11-15T04:00:00.000Z"); // 10:00pm CT, before 11:30
+    const late = closeTimes(new Date("2026-11-15T05:00:00Z"), 8); // 11:00pm CT
+    expect(late[0].getTime()).toBeGreaterThan(Date.parse("2026-11-15T05:15:00Z"));
+    expect(late[7].getTime() - late[0].getTime()).toBe(3 * 3600e3);
+    for (let i = 1; i < late.length; i++) expect(late[i].getTime()).toBeGreaterThan(late[i - 1].getTime());
+  });
+
+  it("picks winners in proportion to the odds", async () => {
+    const { weightedPick } = await import("./testmarkets");
+    expect([0, 0.29, 0.31, 0.99].map((r) => weightedPick([0.3, 0.7], r))).toEqual([0, 0, 1, 1]);
+  });
+});
+
+describe("settlement and override", () => {
+  // [user, outcome, clout_spent, shares]; sells are negative (same case as databricks/lib/test_union.py)
+  const trades = [
+    ["a", 0, 10, 19.8],
+    ["a", 0, -4, -7.5],
+    ["b", 1, 6, 12.0],
+    ["c", 0, 5, 9.0],
+    ["c", 0, -6, -9.0],
+  ] as const;
+
+  it("pays shares still held, or reverses net cash on void", async () => {
+    const { settlementCredits } = await import("./clout");
+    const yes = settlementCredits(trades, 0);
+    close(yes.get("a")!, 12.3);
+    expect(yes.has("b")).toBe(false);
+    expect(yes.has("c")).toBe(false);
+    expect(Object.fromEntries(settlementCredits(trades, "void"))).toEqual({ a: 6, b: 6, c: -1 });
+  });
+
+  it("override moves balances by exactly new - old", async () => {
+    const { overrideDeltas, settlementCredits } = await import("./clout");
+    for (const [from, to] of [[0, 1], [1, "void"], ["void", 0]] as const) {
+      const d = overrideDeltas(trades, from, to);
+      const before = settlementCredits(trades, from);
+      const after = settlementCredits(trades, to);
+      for (const u of ["a", "b", "c"]) close((before.get(u) ?? 0) + (d.get(u) ?? 0), after.get(u) ?? 0);
+    }
+    close(overrideDeltas(trades, 0, 1).get("a")!, -12.3);
+    close(overrideDeltas(trades, 0, 1).get("b")!, 12);
+  });
+});

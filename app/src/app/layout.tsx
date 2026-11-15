@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { CategoryTabs } from "@/components/category-tabs";
 import { SearchBox } from "@/components/search-box";
+import { SimTicker } from "@/components/sim-ticker";
 import { UserChip } from "@/components/user-chip";
 import "./globals.css";
 
@@ -47,6 +48,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </Suspense>
         </header>
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-6">{children}</main>
+        <SimTicker />
         <footer className="border-t border-line py-6 text-center text-xs text-muted">
           Simulated demo data · Clout only, no real money · Ledger on Lakebase · analytics on Lakeflow + Unity Catalog ·
           AI on Databricks Foundation Models
