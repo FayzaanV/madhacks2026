@@ -236,6 +236,6 @@ docs/screenshots/     Images used in this README
 
 ## Team
 
-Built at MadHacks 2026 by Rishon, Fayzaan, Musa and Ben.
+Built at MadHacks 2026 by Rishon Singh, Musa Rahman, Fayzaan Virk and Ben Panackal.
 
 No real money is involved anywhere. All demo data is simulated and labeled as such. MIT licensed.
