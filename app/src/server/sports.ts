@@ -312,6 +312,48 @@ export async function createMarkets() {
   return created;
 }
 
+/**
+ * Games already in progress with no markets (e.g. kicked off before Yomi created them): football and basketball
+ * get a winner market opened at ESPN's live win probability, so they can be bet on immediately. Totals, margins
+ * and hockey/volleyball are skipped mid-game: without live odds their opening price would be stale.
+ */
+export async function createLiveMarkets() {
+  const rows = await q<GameRow>(
+    `SELECT g.* FROM sports_games g
+     WHERE g.state = 'in' AND g.sport IN ('football', 'mens-basketball', 'womens-basketball')
+       AND (g.home_school_id IS NOT NULL OR g.away_school_id IS NOT NULL)
+       AND NOT EXISTS (SELECT 1 FROM markets m WHERE m.event_ref = g.event_id AND m.market_kind = 'winner')`,
+  );
+  let created = 0;
+  for (const r of rows) {
+    const g = rowToGame(r);
+    const s = await espnSummary(g.sport, g.eventId).catch(() => null);
+    if (s?.liveHome == null) continue; // no live probability yet: wait for the next pass
+    const spec = marketsForGame(g, SPORTS[g.sport].defaultTotal).find((x) => x.kind === "winner");
+    if (!spec) continue;
+    const pFocus = spec.focus === "home" ? s.liveHome : 1 - s.liveHome;
+    const marketId = `m-sp-${g.eventId}-winner`;
+    await tx(async (c) => {
+      const ins = await c.query(
+        `INSERT INTO markets (market_id, school_id, course, question, market_type, status, liquidity_b, creator_id,
+           resolution_source, opens_at, closes_at, category, sport, event_ref, market_kind, auto_resolve, opening_note)
+         VALUES ($1,$2,$3,$4,'binary','live',$5,$6,$7,now(),$8,'sports',$9,$10,'winner',true,$11)
+         ON CONFLICT DO NOTHING RETURNING market_id`,
+        [
+          marketId, spec.schoolId, SPORTS[g.sport].label, spec.question, LIQUIDITY_B, SPORTS_BOT,
+          `ESPN final score (event ${g.eventId})`, closesAt("winner", g.sport, g.startsAt), g.sport, g.eventId,
+          `Opened mid-game (${g.detail}) at ${Math.round(pFocus * 100)}% from ESPN's live win probability.`,
+        ],
+      );
+      if (!ins.rowCount) return;
+      const qs = sharesForProbs([pFocus, 1 - pFocus], LIQUIDITY_B);
+      await c.query(`INSERT INTO outcomes (market_id, outcome_index, label, q_shares) VALUES ($1,0,'Yes',$2), ($1,1,'No',$3)`, [marketId, qs[0], qs[1]]);
+      created++;
+    });
+  }
+  return created;
+}
+
 /** Settle auto-resolve sports markets whose game is final (or voided). */
 export async function settleFinished() {
   const rows = await q<GameRow & { market_id: string; market_kind: "winner" | "total" | "margin" | "overtime"; line: number | null }>(

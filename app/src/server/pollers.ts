@@ -72,7 +72,7 @@ export async function tick(): Promise<Record<string, unknown> | null> {
       }
       out.live = await sports.pollLive();
       out.anchored = await sports.anchorLive();
-      out.created = await sports.createMarkets();
+      out.created = (await sports.createMarkets()) + (await sports.createLiveMarkets());
       out.seeded = await sports.seedUntouched();
       out.settled = await sports.settleFinished();
       return out;
