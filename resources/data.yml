@@ -24,6 +24,8 @@ resources:
       libraries:
         - file:
             path: ../databricks/pipelines/union.sql
+        - file:
+            path: ../databricks/pipelines/campus.sql   # rec-center crowding (facility_busyness)
 
   jobs:
     simulate_and_build:
@@ -83,6 +85,13 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               ai_model: ${var.ai_model}
+        # Campus weather: Open-Meteo values for weather markets whose day has ended (the app settles from them).
+        - task_key: campus_weather
+          depends_on:
+            - task_key: medallion
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: ../databricks/notebooks/20_campus_weather.py
         # Union steps: after the core refresh, each runs whatever happened before it (run_if ALL_DONE).
         - task_key: union_feed
           depends_on:
