@@ -365,3 +365,38 @@ CREATE TABLE IF NOT EXISTS poller_leases (
   holder      text NOT NULL,
   expires_at  timestamptz NOT NULL
 );
+
+-- ------------------------------------------------------------------ campus markets: weather + rec-center crowding
+-- Admin-created Yes/No markets that settle themselves from data (category 'campus', market_kind weather | facility,
+-- auto_resolve true). auto_rule: JSON text (app/src/core/auto-rules.ts); text, not jsonb, so the bronze sync reads a string.
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS auto_rule text;
+
+-- System account that settles campus markets (not a person, not simulated).
+INSERT INTO users (user_id, handle, email, handle_chosen_at)
+VALUES ('u-yomi-campus', 'yomi_campus', 'campus-bot@yomi.invalid', now())
+ON CONFLICT (user_id) DO NOTHING;
+
+-- UW Rec Well live counts. The feed only shows current counts, so this table is the history: one row per count update.
+-- Written by an app instance that can reach the feed (Free Edition Databricks can't; a laptop relay does it).
+CREATE TABLE IF NOT EXISTS facility_counts (
+  location_id       int         NOT NULL,
+  location_name     text        NOT NULL,
+  facility_name     text        NOT NULL,
+  last_count        int         NOT NULL,
+  capacity          int         NOT NULL,
+  is_closed         boolean     NOT NULL,
+  source_updated_at timestamptz NOT NULL,   -- when the rec center updated the count
+  fetched_at        timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (location_id, source_updated_at)
+);
+
+-- Open-Meteo daily values for Madison. Written by the yomi-refresh task campus_weather (Databricks can reach
+-- Open-Meteo) or by an app instance that can; read by the app to settle weather markets.
+CREATE TABLE IF NOT EXISTS weather_observations (
+  obs_date   date             NOT NULL,
+  metric     text             NOT NULL,     -- temp_max_f | temp_min_f | precip_in | snow_in
+  value      double precision NOT NULL,
+  source     text             NOT NULL DEFAULT 'open-meteo',
+  fetched_at timestamptz      NOT NULL DEFAULT now(),
+  PRIMARY KEY (obs_date, metric)
+);

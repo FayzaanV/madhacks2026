@@ -54,6 +54,35 @@ export async function tick(): Promise<Record<string, unknown> | null> {
   }
 }
 
+/**
+ * Campus markets (server/campus-data.ts): save UW Rec Well counts and settle due weather / rec-center markets.
+ * Runs in every instance without the lease: saving counts is idempotent and settling twice is refused, and the
+ * point is that a laptop relay can save rec counts while the deployed app (no outbound internet on Free Edition)
+ * holds the sports lease. Off with CAMPUS_POLLER=0.
+ */
+const CAMPUS_EVERY_MS = 5 * 60_000;
+let campusRunning = false;
+let campusFeedErrorLogged = false;
+
+export async function campusTick() {
+  if (campusRunning) return null;
+  campusRunning = true;
+  try {
+    const r = await inBackground(async () => (await import("./campus-data")).pollOnce());
+    if (r.snapshotError && !campusFeedErrorLogged) {
+      console.log(`[campus] rec feed unreachable from this instance (${r.snapshotError}); the laptop relay saves counts`);
+      campusFeedErrorLogged = true;
+    }
+    if (r.facilityRowsSaved || r.resolved.length || r.waiting.length) console.log("[campus]", JSON.stringify({ ...r, snapshotError: undefined }));
+    return r;
+  } catch (e) {
+    console.error("[campus] tick failed", String(e).slice(0, 300));
+    return null;
+  } finally {
+    campusRunning = false;
+  }
+}
+
 let started = false;
 export function startPollers() {
   if (started || process.env.SPORTS_POLLER === "0") return;
@@ -65,4 +94,8 @@ export function startPollers() {
     });
   setTimeout(run, 5_000);
   setInterval(run, TICK_MS).unref?.();
+  if (process.env.CAMPUS_POLLER !== "0") {
+    setTimeout(() => void campusTick(), 15_000);
+    setInterval(() => void campusTick(), CAMPUS_EVERY_MS).unref?.();
+  }
 }
