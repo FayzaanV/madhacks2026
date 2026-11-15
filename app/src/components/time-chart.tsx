@@ -42,12 +42,14 @@ export function TimeChart({
   domain,
   format,
   height = 260,
+  width = 640,
   header,
 }: {
   series: Series[];
   domain?: [number, number];
   format: (v: number) => string;
   height?: number;
+  width?: number;
   header?: (values: (number | null)[], t: number | null, start: (number | null)[]) => ReactNode;
 }) {
   const all = series.flatMap((s) => s.points.map((p) => p.t));
@@ -62,7 +64,7 @@ export function TimeChart({
   const t0 = span === Infinity ? tMin : Math.max(tMin, tMax - span);
   const t1 = Math.max(tMax, t0 + 1);
 
-  const W = 640;
+  const W = width;
   const axisH = 22; // time labels under the plot
   const H = height + axisH;
   const padL = 8;

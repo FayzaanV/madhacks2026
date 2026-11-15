@@ -97,14 +97,25 @@ async function briers(ids: string[]): Promise<Map<string, number>> {
   return new Map(rows.map((r) => [r.user_id, r.brier]));
 }
 
-/** Top `top` and bottom `bottom` (Hall of Shame) of a scope, ranked live. */
-export async function leaderboard(scope: Scope, value: string, top = 25, bottom = 10) {
-  const [sql, params] =
-    scope === "course"
-      ? [`${COURSE} SELECT * FROM (${RANKED}) x`, [value]]
-      : scope === "overall"
-        ? [`${BASE} SELECT * FROM (${RANKED}) x`, []]
-        : [`${BASE.replace("WHERE u.deleted_at IS NULL", `WHERE u.deleted_at IS NULL AND u.${USER_COLUMN[scope]} = $1`)} SELECT * FROM (${RANKED}) x`, [value]];
+/** Top `top` and bottom `bottom` (Hall of Shame) of a scope, ranked live. `school` limits it to one university. */
+export async function leaderboard(scope: Scope, value: string, top = 25, bottom = 10, school: string | null = null) {
+  const params: string[] = [];
+  const add = (v: string) => (params.push(v), `$${params.length}`);
+  let base: string;
+  if (scope === "course") {
+    add(value); // COURSE uses $1 for the course
+    base = school
+      ? COURSE.replace("AND u.deleted_at IS NULL", () => `AND u.deleted_at IS NULL AND u.school_id = ${add(school)}`)
+      : COURSE;
+  } else {
+    const filters: string[] = [];
+    if (scope !== "overall") filters.push(`u.${USER_COLUMN[scope]} = ${add(value)}`);
+    if (school) filters.push(`u.school_id = ${add(school)}`);
+    base = filters.length
+      ? BASE.replace("WHERE u.deleted_at IS NULL", () => `WHERE u.deleted_at IS NULL AND ${filters.join(" AND ")}`)
+      : BASE;
+  }
+  const sql = `${base} SELECT * FROM (${RANKED}) x`;
   const [best, worst] = await Promise.all([
     q<Omit<LeaderRow, "brier">>(`${sql} ORDER BY rank, handle LIMIT ${top}`, params),
     q<Omit<LeaderRow, "brier">>(`${sql} ORDER BY rank_from_bottom, handle LIMIT ${bottom}`, params),
@@ -114,8 +125,8 @@ export async function leaderboard(scope: Scope, value: string, top = 25, bottom 
   return { top: withBrier(best), shame: withBrier(worst) };
 }
 
-/** Values a scope can take (majors, dorms, clubs, courses with resolved markets), sorted. */
-export async function scopeValues(scope: Scope): Promise<string[]> {
+/** Values a scope can take (majors, dorms, clubs, courses with resolved markets), sorted. Majors/clubs/dorms can be limited to one school. */
+export async function scopeValues(scope: Scope, school: string | null = null): Promise<string[]> {
   if (scope === "overall") return ["all"];
   if (scope === "course") {
     const rows = await q<{ v: string }>(
@@ -127,7 +138,8 @@ export async function scopeValues(scope: Scope): Promise<string[]> {
   const col = USER_COLUMN[scope];
   const rows = await q<{ v: string }>(
     `SELECT DISTINCT u.${col} AS v FROM users u WHERE u.${col} IS NOT NULL AND u.${col} <> 'none'
-       AND u.deleted_at IS NULL AND EXISTS (SELECT 1 FROM trades t WHERE t.user_id = u.user_id) ORDER BY 1`,
+       AND u.deleted_at IS NULL ${school ? "AND u.school_id = $1" : ""} AND EXISTS (SELECT 1 FROM trades t WHERE t.user_id = u.user_id) ORDER BY 1`,
+    school ? [school] : [],
   );
   return rows.map((r) => r.v);
 }

@@ -4,9 +4,8 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 /** Category row under the header. Categories filter the home board via ?cat=. */
-const CATS: { key: string; label: string; href?: string }[] = [
+const CATS: { key: string; label: string; href?: string; dot?: boolean }[] = [
   { key: "", label: "Trending" },
-  { key: "mispriced", label: "Smart Money alerts" },
   { key: "campus", label: "Campus" },
   { key: "sports", label: "Sports", href: "/sports" },
   { key: "intramurals", label: "Intramurals", href: "/intramurals" },
@@ -27,18 +26,25 @@ export function CategoryTabs() {
   const active =
     path === "/" ? (sp.get("cat") ?? "") : (["union", "sports", "intramurals"].find((k) => path.startsWith(`/${k}`)) ?? null);
   return (
-    <nav className="no-scrollbar mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 text-sm">
-      {CATS.map((c) => (
-        <Link
-          key={c.key || "all"}
-          href={c.href ?? (c.key ? `/?cat=${encodeURIComponent(c.key)}` : "/")}
-          className={`shrink-0 rounded-lg px-3 py-1.5 font-medium ${
-            active === c.key ? "bg-accent-soft text-accent" : "text-muted hover:text-ink"
-          }`}
-        >
-          {c.label}
-        </Link>
-      ))}
+    <nav className="no-scrollbar overflow-x-auto text-sm" aria-label="Market categories">
+      <div className="mx-auto flex w-max gap-1 px-4">
+        {CATS.map((c) => {
+          const on = active === c.key;
+          return (
+            <Link
+              key={c.key || "all"}
+              href={c.href ?? (c.key ? `/?cat=${encodeURIComponent(c.key)}` : "/")}
+              aria-current={on ? "page" : undefined}
+              className={`flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-3 font-semibold transition-colors ${
+                on ? "border-accent text-accent" : "border-transparent text-muted hover:text-ink"
+              }`}
+            >
+              {c.label}
+              {c.dot && <span className="h-1.5 w-1.5 rounded-full bg-accent" aria-hidden />}
+            </Link>
+          );
+        })}
+      </div>
     </nav>
   );
 }
