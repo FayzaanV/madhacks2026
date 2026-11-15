@@ -1,8 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { CreateOrJoin } from "@/components/group-tools";
-import { myGroups } from "@/server/social";
+import { CreateOrJoin, InviteList } from "@/components/group-tools";
+import { myGroups, myInvites } from "@/server/social";
 import { currentUser } from "@/server/user";
 
 export default function GroupsPage() {
@@ -22,9 +22,10 @@ export default function GroupsPage() {
 async function Groups() {
   const me = await currentUser();
   if (!me) redirect("/login");
-  const groups = await myGroups(me);
+  const [groups, invites] = await Promise.all([myGroups(me), myInvites(me)]);
   return (
     <div className="space-y-5">
+      <InviteList invites={invites} />
       {groups.length > 0 && (
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {groups.map((g) => (

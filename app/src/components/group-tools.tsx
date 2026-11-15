@@ -233,3 +233,92 @@ export function JoinButton({ code }: { code: string }) {
     </div>
   );
 }
+
+/** Group page: invite friends who aren't members yet, right from the app. */
+export function InviteFriends({
+  groupId,
+  friends,
+}: {
+  groupId: string;
+  friends: { user_id: string; handle: string; invited: boolean }[];
+}) {
+  const router = useRouter();
+  const [sent, setSent] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <section className="rounded-2xl border border-line bg-panel p-4 text-sm">
+      <h2 className="font-semibold">Invite friends</h2>
+      {friends.length === 0 ? (
+        <p className="mt-1 text-muted">
+          All your friends are in already, or you haven&apos;t added any yet. Add friends on the <a href="/friends" className="text-accent">Friends</a> page.
+        </p>
+      ) : (
+        <ul className="mt-2 space-y-1.5">
+          {friends.map((f) => {
+            const done = f.invited || sent.includes(f.user_id);
+            return (
+              <li key={f.user_id} className="flex items-center gap-2">
+                <span className="font-medium">@{f.handle}</span>
+                <button
+                  disabled={done}
+                  className={`ml-auto ${btn} ${done ? "text-muted" : "bg-accent text-accent-ink"}`}
+                  onClick={async () => {
+                    setError(null);
+                    const r = await send(`/api/groups/${groupId}/invites`, "POST", { user_ids: [f.user_id] });
+                    if (!r.ok) return setError(r.j.error ?? "Couldn't invite.");
+                    setSent((s) => [...s, f.user_id]);
+                    router.refresh();
+                  }}
+                >
+                  {done ? "Invited" : "Invite"}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {error && <p className="mt-1 text-no">{error}</p>}
+    </section>
+  );
+}
+
+/** /groups: invites waiting for you; join or decline in one click. */
+export function InviteList({ invites }: { invites: { group_id: string; name: string; invited_by: string; members: number }[] }) {
+  const router = useRouter();
+  const [error, setError] = useState<string | null>(null);
+  if (!invites.length) return null;
+  return (
+    <section className="rounded-2xl border border-accent bg-accent-soft/40 p-4 text-sm">
+      <h2 className="font-semibold">Invitations</h2>
+      <ul className="mt-2 divide-y divide-line">
+        {invites.map((i) => (
+          <li key={i.group_id} className="flex flex-wrap items-center gap-2 py-2">
+            <span className="flex-1">
+              <b>{i.name}</b> <span className="text-muted">· {i.members} member{i.members === 1 ? "" : "s"} · from @{i.invited_by}</span>
+            </span>
+            <button
+              className={`${btn} bg-accent text-accent-ink`}
+              onClick={async () => {
+                const r = await send(`/api/groups/invites/${i.group_id}`, "POST", { accept: true });
+                if (!r.ok) return setError(r.j.error ?? "Couldn't join.");
+                router.push(`/groups/${i.group_id}`);
+              }}
+            >
+              Join
+            </button>
+            <button
+              className={`${btn} border border-line`}
+              onClick={async () => {
+                await send(`/api/groups/invites/${i.group_id}`, "POST", { accept: false });
+                router.refresh();
+              }}
+            >
+              Decline
+            </button>
+          </li>
+        ))}
+      </ul>
+      {error && <p className="mt-1 text-no">{error}</p>}
+    </section>
+  );
+}

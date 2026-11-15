@@ -11,6 +11,7 @@ export type NotificationKind =
   | "friend_request"
   | "friend_accepted"
   | "group_joined"
+  | "group_invite"
   | "tagged"
   | "mentioned"
   | "market_vetoed"

@@ -3,10 +3,10 @@ import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Avatar, PersonLine } from "@/components/avatar";
 import { Clout } from "@/components/clout";
-import { GroupMarketForm, InviteLink, LeaveOrDelete, MemberActions } from "@/components/group-tools";
+import { GroupMarketForm, InviteFriends, InviteLink, LeaveOrDelete, MemberActions } from "@/components/group-tools";
 import { fmtDateTime } from "@/core/time";
 import { listGroupMarkets } from "@/server/markets";
-import { getGroup, groupLeaderboard } from "@/server/social";
+import { getGroup, groupLeaderboard, invitableFriends } from "@/server/social";
 import { currentUser } from "@/server/user";
 
 export default function GroupPage({ params }: PageProps<"/groups/[id]">) {
@@ -23,7 +23,7 @@ async function Group({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const group = await getGroup(me, id);
   if (!group) notFound(); // not a member (or no such group)
-  const [markets, board] = await Promise.all([listGroupMarkets(id), groupLeaderboard(id)]);
+  const [markets, board, toInvite] = await Promise.all([listGroupMarkets(id), groupLeaderboard(id), invitableFriends(me, id)]);
   const canManage = group.role !== "member";
   const open = markets.filter((m) => m.status === "live" && !m.past_close);
   const rest = markets.filter((m) => !(m.status === "live" && !m.past_close));
@@ -35,7 +35,8 @@ async function Group({ params }: { params: Promise<{ id: string }> }) {
           <p className="text-sm text-muted">Private group · {group.members} member{group.members === 1 ? "" : "s"}</p>
           <h1 className="text-3xl font-bold">{group.name}</h1>
           {group.description && <p className="mt-1 text-muted">{group.description}</p>}
-          <div className="mt-3">
+          <p className="mt-3 text-xs text-muted">Invite friends directly from the panel on the right, or share a link:</p>
+          <div className="mt-1">
             <InviteLink groupId={id} code={group.invite_code} canManage={canManage} />
           </div>
         </header>
@@ -98,6 +99,7 @@ async function Group({ params }: { params: Promise<{ id: string }> }) {
       </div>
 
       <aside className="space-y-4 lg:sticky lg:top-28 lg:self-start">
+        <InviteFriends groupId={id} friends={toInvite.map((f) => ({ user_id: f.user_id, handle: f.handle, invited: f.invited }))} />
         <GroupMarketForm groupId={id} members={group.memberList.map((m) => ({ user_id: m.user_id, handle: m.handle }))} />
         <section className="rounded-2xl border border-line bg-panel p-4 text-sm">
           <h2 className="font-semibold">Members</h2>

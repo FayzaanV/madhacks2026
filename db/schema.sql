@@ -493,3 +493,13 @@ CREATE TABLE IF NOT EXISTS notifications (
   read_at    timestamptz
 );
 CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, read_at, created_at);
+
+-- Direct group invites (in-app, no link): a member invites a friend; the friend accepts or declines on /groups.
+CREATE TABLE IF NOT EXISTS group_invites (
+  group_id   text NOT NULL REFERENCES groups(group_id),
+  user_id    text NOT NULL REFERENCES users(user_id),
+  invited_by text NOT NULL REFERENCES users(user_id),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS group_invites_user_idx ON group_invites (user_id);

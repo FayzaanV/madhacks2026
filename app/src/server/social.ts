@@ -172,6 +172,68 @@ export async function joinByCode(me: Me, code: string) {
   return { group_id: g.group_id };
 }
 
+// ------------------------------------------------------------------ in-app group invites (no link needed)
+
+/** Any member can invite their friends; invitees get a notification and accept/decline on /groups. */
+export async function inviteToGroup(me: Me, groupId: string, userIds: unknown) {
+  const ids = [...new Set((Array.isArray(userIds) ? userIds : [userIds]).map(String))].slice(0, 50);
+  const g = await getGroup(me, groupId);
+  if (!g) throw new TradeError("Group not found.", 404);
+  if (!ids.length) throw new TradeError("Pick at least one friend.");
+  const { friends } = await listFriends(me);
+  const notFriends = ids.filter((id) => !friends.some((f) => f.user_id === id));
+  if (notFriends.length) throw new TradeError("You can only invite your friends.", 403);
+  const fresh = await q<{ user_id: string }>(
+    `INSERT INTO group_invites (group_id, user_id, invited_by)
+     SELECT $1, u, $2 FROM unnest($3::text[]) AS u
+     WHERE NOT EXISTS (SELECT 1 FROM group_members m WHERE m.group_id = $1 AND m.user_id = u)
+     ON CONFLICT (group_id, user_id) DO NOTHING RETURNING user_id`,
+    [groupId, me.user_id, ids],
+  );
+  await notify(fresh.map((r) => r.user_id), "group_invite", groupId, me.user_id, `@${me.handle} invited you to ${g.name}.`);
+  return { invited: fresh.length };
+}
+
+export type Invite = { group_id: string; name: string; description: string | null; members: number; invited_by: string };
+
+export async function myInvites(me: Me): Promise<Invite[]> {
+  return q<Invite>(
+    `SELECT g.group_id, g.name, g.description, u.handle AS invited_by,
+            (SELECT count(*)::int FROM group_members x WHERE x.group_id = g.group_id) AS members
+     FROM group_invites i JOIN groups g USING (group_id) JOIN users u ON u.user_id = i.invited_by
+     WHERE i.user_id = $1 AND g.deleted_at IS NULL ORDER BY i.created_at DESC`,
+    [me.user_id],
+  );
+}
+
+/** Accept (join) or decline an invite. */
+export async function respondInvite(me: Me, groupId: string, accept: boolean) {
+  return tx(async (c) => {
+    const inv = (await c.query("DELETE FROM group_invites WHERE group_id = $1 AND user_id = $2 RETURNING invited_by", [groupId, me.user_id]))
+      .rows[0];
+    if (!inv) throw new TradeError("That invite isn't there anymore.", 404);
+    if (!accept) return { status: "declined" };
+    const g = (await c.query("SELECT name FROM groups WHERE group_id = $1 AND deleted_at IS NULL", [groupId])).rows[0];
+    if (!g) throw new TradeError("That group was deleted.", 404);
+    await c.query("INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING", [groupId, me.user_id]);
+    await notify([inv.invited_by], "group_joined", groupId, me.user_id, `@${me.handle} joined ${g.name}.`, c);
+    return { status: "joined", group_id: groupId };
+  });
+}
+
+/** Friends you could invite to a group: not members yet; `invited` marks ones with a pending invite. */
+export async function invitableFriends(me: Me, groupId: string) {
+  return q<Person & { invited: boolean }>(
+    `SELECT ${PERSON}, EXISTS (SELECT 1 FROM group_invites i WHERE i.group_id = $2 AND i.user_id = u.user_id) AS invited
+     FROM friendships f
+     JOIN users u ON u.user_id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END
+     WHERE (f.user_a = $1 OR f.user_b = $1) AND f.status = 'accepted' AND u.deleted_at IS NULL
+       AND NOT EXISTS (SELECT 1 FROM group_members m WHERE m.group_id = $2 AND m.user_id = u.user_id)
+     ORDER BY lower(u.handle)`,
+    [me.user_id, groupId],
+  );
+}
+
 async function requireGroupAdmin(me: Me, groupId: string, ownerOnly = false) {
   const [r] = await q<{ role: string }>("SELECT role FROM group_members WHERE group_id = $1 AND user_id = $2", [groupId, me.user_id]);
   if (!r || (ownerOnly ? r.role !== "owner" : r.role === "member")) throw new TradeError("Only the group's owner can do that.", 403);

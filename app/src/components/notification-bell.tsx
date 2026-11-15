@@ -8,7 +8,7 @@ type Item = { id: string; kind: string; ref_id: string | null; body: string; cre
 
 /** Where a notification leads. */
 const hrefFor = (n: Item) =>
-  n.kind.startsWith("friend") ? "/friends" : n.kind === "group_joined" ? `/groups/${n.ref_id}` : n.ref_id ? `/markets/${n.ref_id}` : "/friends";
+  n.kind.startsWith("friend") ? "/friends" : n.kind === "group_invite" ? "/groups" : n.kind === "group_joined" ? `/groups/${n.ref_id}` : n.ref_id ? `/markets/${n.ref_id}` : "/friends";
 
 /** Header bell: unread count; opening it loads the latest 30 and marks them read. */
 export function NotificationBell({ unread: initial }: { unread: number }) {
