@@ -34,12 +34,11 @@ function BoardSkeleton() {
   );
 }
 
-function matches(m: Market, cat: string, q: string, gapOf: Map<string, number>) {
+function matches(m: Market, cat: string, q: string) {
   if (q && !`${m.question} ${m.course}`.toLowerCase().includes(q.toLowerCase())) return false;
   // Sports and intramural markets (hundreds, auto-created) live on /sports and /intramurals; search still finds them.
   if (!q && (m.category === "sports" || m.category === "intramural")) return false;
   if (!cat) return true;
-  if (cat === "mispriced") return (gapOf.get(m.market_id) ?? 0) >= 0.1;
   if (cat === "closing") return Date.parse(m.closes_at) - Date.now() < 864e5; // open markets closing within 24h
   if (cat === "campus") return m.course === "campus";
   return m.course.toLowerCase().startsWith(cat.toLowerCase()) || m.course.toLowerCase().includes(`${cat.toLowerCase()} `);
@@ -67,7 +66,7 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   // `shame` comes back lowest-first; show the five lowest with the highest of them on top, like the top list.
   const bottom: Leader[] = board.shame;
   const gapOf = new Map(gaps.map((g) => [g.market_id, g.gap]));
-  const shown = markets.filter((m) => matches(m, cat, q, gapOf));
+  const shown = markets.filter((m) => matches(m, cat, q));
   const featured = !cat && !q ? (markets.find((m) => m.market_id === gaps[0]?.market_id) ?? markets[0]) : null;
 
   return (
