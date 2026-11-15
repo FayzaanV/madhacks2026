@@ -31,6 +31,7 @@ export type Market = {
   sport: string | null;
   event_ref: string | null;
   market_kind: string | null;
+  opening_note: string | null;
   /** Live/final score for sports and intramural markets. */
   game: GameBadge | null;
 };
@@ -55,7 +56,7 @@ function withPrices<T extends { liquidity_b: number; outcomes: Omit<Outcome, "pr
 const MARKET_SQL = `
   SELECT m.market_id, m.course, m.question, m.market_type, m.status, m.liquidity_b, m.resolution_source,
          m.closes_at, m.is_simulated, m.closes_at < now() AS past_close,
-         m.category, m.sport, m.event_ref, m.market_kind,
+         m.category, m.sport, m.event_ref, m.market_kind, m.opening_note,
          CASE WHEN m.category = 'sports' THEN (
            SELECT json_build_object('kind', 'sports', 'state', sg.state, 'detail', sg.detail, 'home', sg.home_abbr,
                     'away', sg.away_abbr, 'home_score', sg.home_score, 'away_score', sg.away_score, 'starts_at', sg.starts_at,

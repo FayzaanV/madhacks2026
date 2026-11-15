@@ -10,7 +10,15 @@ type Row = { state: GameBadge["state"]; detail: string | null; home_abbr: string
  * Score panel on sports/intramural market pages. Sports games re-poll /api/sports/games/:id every 30 s while
  * live; when the game goes final the page refreshes so the auto-resolution shows up.
  */
-export function LiveScore({ initial, eventId, market }: { initial: GameBadge; eventId: string | null; market: { kind: string | null; resolved: boolean } }) {
+export function LiveScore({
+  initial,
+  eventId,
+  market,
+}: {
+  initial: GameBadge;
+  eventId: string | null;
+  market: { kind: string | null; resolved: boolean; closesAt: string; openingNote: string | null; liveOdds: boolean };
+}) {
   const router = useRouter();
   const [g, setG] = useState(initial);
   useEffect(() => {
@@ -26,6 +34,7 @@ export function LiveScore({ initial, eventId, market }: { initial: GameBadge; ev
   }, [g.kind, g.state, eventId, router]);
 
   const live = g.state === "in";
+  const tradesLive = Date.parse(market.closesAt) > Date.parse(g.starts_at) + 60_000;
   return (
     <section className={`rounded-2xl border p-4 ${live ? "border-no/40" : "border-line"} bg-panel`}>
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide">
@@ -42,9 +51,19 @@ export function LiveScore({ initial, eventId, market }: { initial: GameBadge; ev
       </div>
       <p className="mt-2 text-xs text-muted">
         {g.state === "pre"
-          ? `Starts ${new Date(g.starts_at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })} CT · trading closes at the start`
+          ? `Starts ${new Date(g.starts_at).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Chicago" })} CT · ${tradesLive ? "trades live during the game" : "trading closes at the start"}`
           : g.detail}
       </p>
+      {market.openingNote && <p className="mt-1 text-xs text-muted">{market.openingNote}</p>}
+      {tradesLive && !market.resolved && (
+        <p className="mt-1 text-xs font-medium text-accent">
+          {market.kind === "winner" && market.liveOdds
+            ? "Live trading: the price follows ESPN's live win probability every minute until the final whistle."
+            : market.kind === "total"
+              ? "Live trading: settles Over the moment the combined score passes the line."
+              : "Live trading until the final whistle."}
+        </p>
+      )}
       {!market.resolved && (
         <p className="mt-3 rounded-lg bg-panel-2 p-2 text-xs text-muted">
           {g.kind === "sports"

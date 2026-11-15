@@ -14,7 +14,7 @@ export default function SportsPage({ searchParams }: PageProps<"/sports">) {
         <h1 className="text-3xl font-bold">Big Ten sports</h1>
         <p className="text-muted">
           Live scores from ESPN. Every game involving a Big Ten school gets winner, over/under, margin and overtime markets
-          (opening 8 days ahead) that close at the start and resolve themselves at the final whistle. Team markets only, never individual players.
+          (opening 8 days ahead at real-world odds). Winner markets in football and basketball and every over/under trade live and resolve themselves at the final whistle. Team markets only, never individual players.
         </p>
       </div>
       <Suspense fallback={<div className="h-96 animate-pulse rounded-2xl border border-line bg-panel" />}>

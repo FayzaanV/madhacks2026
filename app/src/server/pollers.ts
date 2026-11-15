@@ -71,7 +71,9 @@ export async function tick(): Promise<Record<string, unknown> | null> {
         lastSchedule = Date.now();
       }
       out.live = await sports.pollLive();
+      out.anchored = await sports.anchorLive();
       out.created = await sports.createMarkets();
+      out.seeded = await sports.seedUntouched();
       out.settled = await sports.settleFinished();
       return out;
     });
@@ -120,7 +122,7 @@ export function startPollers() {
   const run = () =>
     void tick().then((r) => {
       // Log only passes that did something (or failed), not routine skips.
-      if (r && (r.error || r.scheduleGames || r.created || r.settled || r.imAutoConfirmed)) console.log("[pollers]", JSON.stringify(r));
+      if (r && (r.error || r.scheduleGames || r.created || r.settled || r.seeded || r.imAutoConfirmed)) console.log("[pollers]", JSON.stringify(r));
     });
   setTimeout(run, 5_000);
   setInterval(run, TICK_MS).unref?.();

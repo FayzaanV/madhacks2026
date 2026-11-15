@@ -75,7 +75,13 @@ async function Market({
             <LiveScore
               initial={market.game}
               eventId={market.category === "sports" ? market.event_ref : null}
-              market={{ kind: market.market_kind, resolved: market.winning_outcome_index != null || market.status === "voided" }}
+              market={{
+                kind: market.market_kind,
+                resolved: market.winning_outcome_index != null || market.status === "voided",
+                closesAt: new Date(market.closes_at).toISOString(),
+                openingNote: market.opening_note,
+                liveOdds: market.category === "sports" && ["football", "mens-basketball", "womens-basketball"].includes(market.sport ?? ""),
+              }}
             />
           )}
 

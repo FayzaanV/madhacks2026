@@ -1,7 +1,7 @@
 import "server-only";
 import type { PoolClient } from "pg";
 import { prices } from "@/core/lmsr";
-import { marketsForGame, parseEvent, resolveOutcome, scoreLine, SPORTS, totalLine, type Game, type SportKey } from "@/core/sports";
+import { closesAt, decidedEarly, marketsForGame, openingProbs, parseEvent, ratingWinProb, resolveOutcome, scoreLine, sharesForProbs, SPORTS, totalLine, type Game, type MarketKind, type SportKey } from "@/core/sports";
 import { UNIVERSITIES } from "@/core/universities";
 import { q, tx } from "./ledger";
 import { settleMarket } from "./markets";
@@ -15,6 +15,7 @@ import { settleMarket } from "./markets";
  */
 const ESPN = "https://site.api.espn.com/apis/site/v2/sports";
 export const SPORTS_BOT = "u-yomi-sports";
+const LIQUIDITY_B = 300;
 const CREATE_AHEAD_DAYS = 8; // a week+ ahead, so next weekend's football is always open for betting
 const BIG_TEN = UNIVERSITIES.filter((u) => u.espn_id && u.conference === "big-ten");
 
@@ -141,28 +142,150 @@ export function rowToGame(r: GameRow): Game {
   };
 }
 
-async function insertMarket(c: PoolClient, g: Game, spec: ReturnType<typeof marketsForGame>[number]) {
+async function insertMarket(c: PoolClient, g: Game, spec: ReturnType<typeof marketsForGame>[number], odds: Odds) {
   const marketId = `m-sp-${g.eventId}-${spec.kind}`;
+  const pFocus = spec.focus === "home" ? odds.pHome : 1 - odds.pHome;
+  const q = sharesForProbs(openingProbs(spec.kind, g.sport, pFocus), LIQUIDITY_B);
   const inserted = await c.query(
     `INSERT INTO markets (market_id, school_id, course, question, market_type, status, liquidity_b, creator_id,
-       resolution_source, opens_at, closes_at, category, sport, event_ref, market_kind, line, auto_resolve)
-     VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9,'sports',$10,$11,$12,$13,true)
+       resolution_source, opens_at, closes_at, category, sport, event_ref, market_kind, line, auto_resolve, opening_note)
+     VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9,'sports',$10,$11,$12,$13,true,$14)
      ON CONFLICT DO NOTHING RETURNING market_id`,
     [
       marketId, spec.schoolId, SPORTS[g.sport].label, spec.question, spec.outcomes.length === 2 ? "binary" : "multiple_choice",
-      300, SPORTS_BOT, `ESPN final score (event ${g.eventId})`, g.startsAt, g.sport, g.eventId, spec.kind, spec.line,
+      LIQUIDITY_B, SPORTS_BOT, `ESPN final score (event ${g.eventId})`, closesAt(spec.kind, g.sport, g.startsAt), g.sport,
+      g.eventId, spec.kind, spec.line, openingNote(spec.kind, pFocus, odds.source, g.sport),
     ],
   );
   if (!inserted.rowCount) return false;
   await c.query(
     `INSERT INTO outcomes (market_id, outcome_index, label, q_shares)
-     SELECT $1, i - 1, label, 0 FROM unnest($2::text[]) WITH ORDINALITY AS x(label, i)`,
-    [marketId, spec.outcomes],
+     SELECT $1, i - 1, label, q FROM unnest($2::text[], $3::float8[]) WITH ORDINALITY AS x(label, q, i)`,
+    [marketId, spec.outcomes, q],
   );
   return true;
 }
 
-/** Markets for upcoming games (next CREATE_AHEAD_DAYS days) that don't have them yet. Trading closes at kickoff. */
+// ------------------------------------------------------------------ real-world odds
+type Odds = { pHome: number; source: "espn" | "rating" | "even" };
+
+/** ESPN game summary: pre-game matchup predictor and live win probability (football + basketball only). */
+async function espnSummary(sport: SportKey, eventId: string): Promise<{ predictorHome: number | null; liveHome: number | null }> {
+  const d = await espn<{ predictor?: { homeTeam?: { gameProjection?: string } }; winprobability?: { homeWinPercentage?: number }[] }>(
+    `${SPORTS[sport].path}/summary?event=${eventId}`,
+  );
+  const pred = Number(d.predictor?.homeTeam?.gameProjection);
+  const live = d.winprobability?.at(-1)?.homeWinPercentage;
+  return { predictorHome: Number.isFinite(pred) && pred > 0 ? pred / 100 : null, liveHome: typeof live === "number" ? live : null };
+}
+
+/** Home team's chance to win before the game: ESPN's predictor, else season margins, else a coin flip. */
+async function homeWinOdds(g: Game): Promise<Odds> {
+  if (SPORTS[g.sport].liveOdds) {
+    const s = await espnSummary(g.sport, g.eventId).catch(() => null);
+    if (s?.predictorHome != null) return { pHome: s.predictorHome, source: "espn" };
+  }
+  const margins = await q<{ espn_id: string; avg: number; n: number }>(
+    `SELECT t.espn_id, avg(t.m)::float AS avg, count(*)::int AS n FROM (
+       SELECT home_espn_id AS espn_id, home_score - away_score AS m FROM sports_games
+         WHERE sport = $1 AND completed AND starts_at > now() - interval '300 days' AND home_espn_id IN ($2, $3)
+       UNION ALL
+       SELECT away_espn_id, away_score - home_score FROM sports_games
+         WHERE sport = $1 AND completed AND starts_at > now() - interval '300 days' AND away_espn_id IN ($2, $3)) t
+     GROUP BY t.espn_id`,
+    [g.sport, g.home.espnId, g.away.espnId],
+  );
+  const m = new Map(margins.filter((r) => r.n >= 2).map((r) => [r.espn_id, r.avg]));
+  if (!m.has(g.home.espnId) && !m.has(g.away.espnId)) return { pHome: 0.5, source: "even" };
+  return { pHome: ratingWinProb(g.sport, m.get(g.home.espnId) ?? 0, m.get(g.away.espnId) ?? 0), source: "rating" };
+}
+
+function openingNote(kind: MarketKind, pFocus: number, source: Odds["source"], sport: SportKey): string {
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const from = source === "espn" ? "ESPN's matchup predictor" : source === "rating" ? "both teams' results this season" : "no data yet, so even";
+  switch (kind) {
+    case "winner": return `Opened at ${pct(pFocus)} from ${from}.`;
+    case "margin": return `Opened from ${from} (${pct(pFocus)} to win), spread across margins.`;
+    case "overtime": return `Opened at ${pct(SPORTS[sport].overtimeRate)}, how often ${SPORTS[sport].label.toLowerCase()} games go to overtime.`;
+    case "total": return "Opened at 50%: the line is the two teams' average combined total this season.";
+  }
+}
+
+/** Existing sports markets that opened at 50/50 before real odds existed: seed them if nobody has traded yet. */
+export async function seedUntouched(limitGames = 25) {
+  const rows = await q<GameRow>(
+    `SELECT DISTINCT ON (g.event_id) g.* FROM sports_games g JOIN markets m ON m.event_ref = g.event_id
+     WHERE m.category = 'sports' AND m.status = 'live' AND m.opening_note IS NULL AND g.state = 'pre'
+       AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.market_id)
+     ORDER BY g.event_id LIMIT $1`,
+    [limitGames],
+  );
+  let seeded = 0;
+  for (const r of rows) {
+    const g = rowToGame(r);
+    const odds = await homeWinOdds(g);
+    const ms = await q<{ market_id: string; market_kind: MarketKind; liquidity_b: number }>(
+      `SELECT m.market_id, m.market_kind, m.liquidity_b FROM markets m
+       WHERE m.event_ref = $1 AND m.opening_note IS NULL AND NOT EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.market_id)`,
+      [g.eventId],
+    );
+    for (const m of ms) {
+      const focus = g.home.schoolId ? "home" : "away";
+      const pFocus = focus === "home" ? odds.pHome : 1 - odds.pHome;
+      const qs = sharesForProbs(openingProbs(m.market_kind, g.sport, pFocus), m.liquidity_b);
+      await tx(async (c) => {
+        await c.query(
+          `UPDATE outcomes o SET q_shares = x.q FROM unnest($2::float8[]) WITH ORDINALITY AS x(q, i)
+           WHERE o.market_id = $1 AND o.outcome_index = x.i - 1`,
+          [m.market_id, qs],
+        );
+        await c.query("UPDATE markets SET opening_note = $2, closes_at = $3 WHERE market_id = $1", [
+          m.market_id, openingNote(m.market_kind, pFocus, odds.source, g.sport), closesAt(m.market_kind, g.sport, g.startsAt),
+        ]);
+      });
+      seeded++;
+    }
+  }
+  return seeded;
+}
+
+/**
+ * Live games (football/basketball): re-anchor each winner market to ESPN's live win probability, like a market
+ * maker updating its quote, so nobody can buy a stale price after a touchdown. Traders keep their shares.
+ */
+export async function anchorLive() {
+  const rows = await q<GameRow & { market_id: string; liquidity_b: number; q: number[] }>(
+    `SELECT g.*, m.market_id, m.liquidity_b,
+            (SELECT array_agg(o.q_shares ORDER BY o.outcome_index) FROM outcomes o WHERE o.market_id = m.market_id) AS q
+     FROM sports_games g JOIN markets m ON m.event_ref = g.event_id AND m.market_kind = 'winner'
+     WHERE g.state = 'in' AND m.status = 'live' AND m.closes_at > now()`,
+  );
+  let anchored = 0;
+  for (const r of rows) {
+    const g = rowToGame(r);
+    if (!SPORTS[g.sport].liveOdds) continue;
+    const s = await espnSummary(g.sport, g.eventId).catch(() => null);
+    if (s?.liveHome == null) continue;
+    const focusHome = Boolean(g.home.schoolId);
+    const target = focusHome ? s.liveHome : 1 - s.liveHome;
+    const current = prices(r.q, r.liquidity_b)[0];
+    if (Math.abs(current - target) < 0.01) continue;
+    const qs = sharesForProbs([target, 1 - target], r.liquidity_b);
+    await tx(async (c) => {
+      // Lock order matches trades: market row first, then outcomes.
+      await c.query("SELECT 1 FROM markets WHERE market_id = $1 FOR UPDATE", [r.market_id]);
+      await c.query(
+        `UPDATE outcomes o SET q_shares = x.q FROM unnest($2::float8[]) WITH ORDINALITY AS x(q, i)
+         WHERE o.market_id = $1 AND o.outcome_index = x.i - 1`,
+        [r.market_id, qs],
+      );
+    });
+    anchored++;
+  }
+  return anchored;
+}
+
+/** Markets for upcoming games (next CREATE_AHEAD_DAYS days), opened at real-world odds. See closesAt for when each trades until. */
 export async function createMarkets() {
   const rows = await q<GameRow>(
     `SELECT g.* FROM sports_games g
@@ -181,8 +304,9 @@ export async function createMarkets() {
       [g.sport, g.home.espnId, g.away.espnId],
     );
     const line = g.ouLine != null ? Math.floor(g.ouLine) + 0.5 : totalLine(g.sport, past.map((p) => p.total));
+    const odds = await homeWinOdds(g);
     await tx(async (c) => {
-      for (const spec of marketsForGame(g, line)) if (await insertMarket(c, g, spec)) created++;
+      for (const spec of marketsForGame(g, line)) if (await insertMarket(c, g, spec, odds)) created++;
     });
   }
   return created;
@@ -196,7 +320,7 @@ export async function settleFinished() {
        AND ((g.state = 'post' AND g.completed)
             OR g.status_name IN ('STATUS_POSTPONED','STATUS_CANCELED','STATUS_FORFEIT','STATUS_ABANDONED','STATUS_SUSPENDED'))`,
   );
-  let settled = 0;
+  let settled = await settleEarly();
   for (const r of rows) {
     const g = rowToGame(r);
     const focus = g.home.schoolId ? "home" : "away"; // same rule marketsForGame used when creating
@@ -213,6 +337,24 @@ export async function settleFinished() {
   return settled;
 }
 
+/** Mid-game: over/under is settled Over once the line is passed; overtime is settled Yes once OT starts. */
+async function settleEarly() {
+  const rows = await q<GameRow & { market_id: string; market_kind: MarketKind; line: number | null }>(
+    `SELECT g.*, m.market_id, m.market_kind, m.line FROM markets m JOIN sports_games g ON g.event_id = m.event_ref
+     WHERE m.category = 'sports' AND m.auto_resolve AND m.status IN ('live', 'closed') AND g.state = 'in'
+       AND m.market_kind IN ('total', 'overtime')`,
+  );
+  let n = 0;
+  for (const r of rows) {
+    const g = rowToGame(r);
+    const winner = decidedEarly({ kind: r.market_kind, line: r.line }, g);
+    if (winner == null) continue;
+    const why = r.market_kind === "total" ? `Over locked in mid-game: ${scoreLine(g)} (ESPN)` : `Went to overtime: ${scoreLine(g)} (ESPN)`;
+    await settleMarket(r.market_id, winner, why, SPORTS_BOT).then(() => n++).catch((e) => console.warn("[sports] early", String(e).slice(0, 150)));
+  }
+  return n;
+}
+
 // ------------------------------------------------------------------ reads for the UI / API
 /** pg returns timestamptz as Date; the UI and JSON want ISO strings. */
 const iso = (v: string | Date) => new Date(v).toISOString();
@@ -220,7 +362,7 @@ export type GameMarket = {
   market_id: string;
   market_kind: string;
   status: string;
-  open: boolean; // live and before kickoff
+  open: boolean; // live and before its close (kickoff, or the final whistle for live-trading markets)
   outcomes: { label: string; price: number }[];
 };
 export type SportsGame = GameRow & { score_line: string; markets: GameMarket[] };

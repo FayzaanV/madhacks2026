@@ -137,7 +137,12 @@ Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?",
   - winning margin (buckets per sport);
   - overtime, except volleyball.
   - Created 4 days ahead and phrased around the Big Ten team (the home team if both are). `category='sports'`, `event_ref` = ESPN event id, `auto_resolve=true`, created by `u-yomi-sports`.
-- **Trading closes at the scheduled start.** There's no in-game trading.
+- **Opening odds are real-world odds**, not 50/50. The home win chance comes from ESPN's matchup predictor (football, basketball; from the game `summary` endpoint), else from both teams' average margin this season (hockey, volleyball), else 50%. From that: winner opens at that chance; margin buckets come from a normal around the implied margin; overtime opens at the sport's base rate; over/under opens at 50% (the line is the expected total). `openingProbs` and `sharesForProbs` (q = b·ln p) are in `core/sports.ts`, and `markets.opening_note` says where the price came from.
+- **Live trading:**
+  - Winner markets in football and basketball trade until the final whistle. Every minute the poller re-anchors their price to ESPN's live win probability, like a market maker updating its quote; traders keep their shares.
+  - Every over/under trades live and settles **Over** the moment the line is passed.
+  - Hockey and volleyball winners, and all margin and overtime markets, close at the start (no live odds to keep them honest). Overtime still settles Yes as soon as OT starts.
+  - Rules: `closesAt` and `decidedEarly` in `core/sports.ts`.
 - **Team props only:** no player props and no parlays (players are students).
 - **Settlement:** when ESPN marks the game final, `settleMarket` (same payout code as manual resolution) resolves each market as `u-yomi-sports`. Postponed or canceled games void the markets. A tie voids the winner and margin markets.
 - **The poller** (`app/src/server/pollers.ts`, started by `app/src/instrumentation.ts`) runs inside the app every 60 s:

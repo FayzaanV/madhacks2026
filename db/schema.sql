@@ -400,3 +400,6 @@ CREATE TABLE IF NOT EXISTS weather_observations (
   fetched_at timestamptz      NOT NULL DEFAULT now(),
   PRIMARY KEY (obs_date, metric)
 );
+
+-- Where a sports market's opening price came from (e.g. "Opened at 84% from ESPN's matchup predictor").
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS opening_note text;
