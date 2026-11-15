@@ -3,31 +3,46 @@
 import { useRouter } from "next/navigation";
 import { fromMadison } from "@/core/time";
 import { useState } from "react";
+import { latestClose, suggestQuestion, type AutoRule } from "@/core/auto-rules";
+import { AutoRuleFields } from "./auto-rule-fields";
 
 const field = "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm";
 
-/** Admin form: create a live market (binary or multiple choice). Posts to /api/markets, then opens the market. */
+/**
+ * Admin form: create a live market (binary or multiple choice), resolved by hand or automatically from data
+ * (weather from Open-Meteo, rec-center crowding from UW Rec Well live counts). Posts to /api/markets.
+ */
 export function MarketForm() {
   const router = useRouter();
   const [type, setType] = useState<"binary" | "multiple_choice">("binary");
   const [outcomes, setOutcomes] = useState(["", ""]);
+  const [mode, setMode] = useState<"manual" | "weather" | "facility">("manual");
+  const [rule, setRule] = useState<AutoRule | null>(null);
+  const [question, setQuestion] = useState("");
+  const auto = mode !== "manual";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const f = new FormData(e.currentTarget);
+    if (auto && !rule) return setError("Finish the auto-resolution rule first.");
+    const closesRaw = String(f.get("closes_at") ?? "");
+    // Madison time, whatever the browser's zone. Auto markets left blank close right when the answer starts to be known.
+    const closesAt = closesRaw ? fromMadison(closesRaw) : auto && rule ? new Date(latestClose(rule)) : null;
+    if (!closesAt) return setError("Pick when trading closes.");
     setBusy(true);
     setError(null);
     const res = await fetch("/api/markets", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        question: f.get("question"),
+        question,
         course: f.get("course"),
-        market_type: type,
-        outcomes: type === "multiple_choice" ? outcomes : undefined,
-        closes_at: fromMadison(String(f.get("closes_at"))).toISOString(), // Madison time, whatever the browser's zone
+        market_type: auto ? "binary" : type,
+        outcomes: !auto && type === "multiple_choice" ? outcomes : undefined,
+        closes_at: closesAt.toISOString(),
+        auto_rule: auto ? rule : undefined,
         resolution_source: f.get("resolution_source"),
         liquidity_b: Number(f.get("liquidity_b")),
         not_about_a_student: f.get("not_about_a_student") === "on",
@@ -41,21 +56,56 @@ export function MarketForm() {
 
   return (
     <form onSubmit={submit} className="space-y-4 rounded-2xl border border-line bg-panel p-5">
+      <fieldset className="space-y-2 text-sm">
+        <legend className="font-medium">How it resolves</legend>
+        <div className="flex flex-wrap gap-2">
+          {([["manual", "By hand"], ["weather", "Weather (auto)"], ["facility", "Rec center crowd (auto)"]] as const).map(([m, label]) => (
+            <button
+              type="button"
+              key={m}
+              onClick={() => { setMode(m); setRule(null); }}
+              className={`rounded-lg border px-3 py-1.5 ${mode === m ? "border-accent bg-accent-soft font-semibold text-accent" : "border-line"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {auto && <AutoRuleFields key={mode} kind={mode} onChange={setRule} />}
+      </fieldset>
+
       <label className="block space-y-1 text-sm">
-        <span className="font-medium">Question</span>
-        <input name="question" required minLength={10} maxLength={200} className={field} placeholder="Will the CS 400 waitlist clear before Friday?" />
+        <span className="flex items-center justify-between">
+          <span className="font-medium">Question</span>
+          {auto && rule && (
+            <button type="button" onClick={() => setQuestion(suggestQuestion(rule))} className="text-xs font-semibold text-accent">
+              Use suggested question
+            </button>
+          )}
+        </span>
+        <input
+          name="question"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          required
+          minLength={10}
+          maxLength={200}
+          className={field}
+          placeholder={auto && rule ? suggestQuestion(rule) : "Will the CS 400 waitlist clear before Friday?"}
+        />
       </label>
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Course or topic</span>
-          <input name="course" maxLength={40} className={field} placeholder="COMP SCI 400 (blank = campus)" />
+          <input name="course" maxLength={40} disabled={auto} className={field} placeholder={auto ? "campus" : "COMP SCI 400 (blank = campus)"} />
         </label>
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Trading closes (Madison time)</span>
-          <input name="closes_at" type="datetime-local" required className={field} />
+          <input name="closes_at" type="datetime-local" required={!auto} className={field} />
+          {auto && <span className="text-xs text-muted">Blank = close right when the answer starts to be known.</span>}
         </label>
       </div>
 
+      {!auto && (
       <fieldset className="space-y-2 text-sm">
         <legend className="font-medium">Type</legend>
         <div className="flex gap-2">
@@ -97,12 +147,17 @@ export function MarketForm() {
           </div>
         )}
       </fieldset>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-[1fr_140px]">
-        <label className="block space-y-1 text-sm">
-          <span className="font-medium">Resolution source</span>
-          <input name="resolution_source" maxLength={300} className={field} placeholder="https://registrar.wisc.edu or 'Canvas announcement'" />
-        </label>
+        {auto ? (
+          <p className="self-end text-sm text-muted">Yes / No market under Campus. The resolution source is set automatically.</p>
+        ) : (
+          <label className="block space-y-1 text-sm">
+            <span className="font-medium">Resolution source</span>
+            <input name="resolution_source" maxLength={300} className={field} placeholder="https://registrar.wisc.edu or 'Canvas announcement'" />
+          </label>
+        )}
         <label className="block space-y-1 text-sm">
           <span className="font-medium">Liquidity b</span>
           <input name="liquidity_b" type="number" min={50} max={5000} step={50} defaultValue={500} className={field} />

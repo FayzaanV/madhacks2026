@@ -2,6 +2,7 @@ import "server-only";
 import type { PoolClient } from "pg";
 import { applySell, applyTrade, DEFAULT_B, prices, sellProceeds, sharesForProceeds } from "@/core/lmsr";
 import { canAfford, overrideDeltas, privileges, sellBasis, settlementCredits, type Winner } from "@/core/clout";
+import { latestClose, validateRule, type AutoRule } from "@/core/auto-rules";
 import { triggerRefresh } from "./jobs";
 import { openStakeSql, q, tx } from "./ledger";
 import { clearWarehouseCache, querySql } from "./warehouse";
@@ -22,6 +23,7 @@ export type Market = {
   past_close: boolean; // trading has closed, awaiting resolution
   winning_outcome_index: number | null;
   resolution_note: string | null;
+  auto_rule: string | null; // weather / rec-center rule JSON (core/auto-rules.ts); settled by server/campus-data.ts
   n_trades: number;
   volume: number;
   outcomes: Outcome[];
@@ -67,7 +69,7 @@ const MARKET_SQL = `
                     'away_score', g.away_score, 'starts_at', g.starts_at, 'link', '/intramurals/' || g.game_id)
            FROM im_games g JOIN im_teams ht ON ht.team_id = g.home_team_id JOIN im_teams at ON at.team_id = g.away_team_id
            WHERE 'im:' || g.game_id = m.event_ref) END AS game,
-         r.winning_outcome_index, r.rationale AS resolution_note,
+         r.winning_outcome_index, r.rationale AS resolution_note, m.auto_rule,
          (SELECT count(*)::int FROM trades t WHERE t.market_id = m.market_id) AS n_trades,
          (SELECT coalesce(sum(abs(clout_spent)), 0)::float FROM trades t WHERE t.market_id = m.market_id) AS volume,
          (SELECT json_agg(json_build_object('outcome_index', o.outcome_index, 'label', o.label, 'q_shares', o.q_shares)
@@ -408,7 +410,11 @@ export type NewMarket = {
   resolution_source?: string;
   liquidity_b?: number;
   not_about_a_student: boolean;
+  auto_rule?: unknown; // weather / rec-center rule (core/auto-rules.ts): Yes/No, settled automatically from data
 };
+
+export const WEATHER_SOURCE = "Open-Meteo (open-meteo.com), Madison daily values";
+export const FACILITY_SOURCE = "UW Rec Well live facility counts (recwell.wisc.edu)";
 
 /**
  * Create a live market (admins only for now; proposals with upvotes come later). One transaction inserts the
@@ -420,7 +426,13 @@ export async function createMarket(user: { user_id: string; email: string; schoo
   const course = String(input.course ?? "").trim().slice(0, 40) || "campus";
   if (question.length < 10 || question.length > 200) throw new TradeError("Questions are 10–200 characters.");
   if (!input.not_about_a_student) throw new TradeError("Markets can't be about individual students. Confirm the box.");
-  const type = input.market_type === "multiple_choice" ? "multiple_choice" : "binary";
+  let rule: AutoRule | null = null;
+  if (input.auto_rule) {
+    const v = validateRule(input.auto_rule);
+    if ("error" in v) throw new TradeError(v.error);
+    rule = v.rule;
+  }
+  const type = rule ? "binary" : input.market_type === "multiple_choice" ? "multiple_choice" : "binary";
   const labels =
     type === "binary"
       ? ["Yes", "No"]
@@ -429,15 +441,21 @@ export async function createMarket(user: { user_id: string; email: string; schoo
   const closes = Date.parse(String(input.closes_at ?? ""));
   if (!Number.isFinite(closes) || closes < Date.now() + 5 * 60e3) throw new TradeError("Pick a close time at least 5 minutes from now.");
   if (closes > Date.now() + 366 * 86400e3) throw new TradeError("Close time must be within a year.");
+  if (rule && closes > latestClose(rule))
+    throw new TradeError("Trading has to close before the answer is known: by the start of that day, or by the check time.");
+  const source = rule
+    ? rule.kind === "weather" ? WEATHER_SOURCE : FACILITY_SOURCE
+    : String(input.resolution_source ?? "").trim().slice(0, 300) || null;
   const b = Number(input.liquidity_b ?? DEFAULT_B);
   if (!(b >= 50 && b <= 5000)) throw new TradeError("Liquidity b must be between 50 and 5000.");
   const marketId = `m-${crypto.randomUUID()}`;
   await tx(async (c) => {
     await c.query(
       `INSERT INTO markets (market_id, school_id, course, question, market_type, status, liquidity_b, creator_id,
-                            resolution_source, opens_at, closes_at)
-       VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9)`,
-      [marketId, user.school_id, course, question, type, b, user.user_id, String(input.resolution_source ?? "").trim().slice(0, 300) || null, new Date(closes)],
+                            resolution_source, opens_at, closes_at, category, market_kind, auto_resolve, auto_rule)
+       VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9,$10,$11,$12,$13)`,
+      [marketId, user.school_id, rule ? "campus" : course, question, type, b, user.user_id, source, new Date(closes),
+       rule ? "campus" : "academic", rule ? rule.kind : null, Boolean(rule), rule ? JSON.stringify(rule) : null],
     );
     await c.query(
       `INSERT INTO outcomes (market_id, outcome_index, label, q_shares)

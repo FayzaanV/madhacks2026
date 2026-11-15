@@ -33,6 +33,8 @@ TABLES = {  # postgres table -> bronze table
     "venue_metrics": "venue_metrics_raw", "venue_reports": "venue_reports_raw",
     "sports_games": "sports_games_raw",  # ESPN games the app's sports poller tracks (poller_leases is not synced)
     "im_leagues": "im_leagues_raw", "im_teams": "im_teams_raw", "im_games": "im_games_raw",
+    "facility_counts": "facility_counts_raw",           # UW Rec Well count history (saved by the laptop relay)
+    "weather_observations": "weather_observations_raw", # Open-Meteo values behind weather markets (20_campus_weather)
 }
 APPEND_ONLY = {  # table -> primary key columns
     "trades": ["trade_id"], "ai_questions": ["question_id"], "venue_reports": ["report_id"],

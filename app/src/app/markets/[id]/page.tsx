@@ -13,6 +13,7 @@ import { LiveScore } from "@/components/live-score";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { getInsight } from "@/server/analyst";
 import { canResolve, getComments, getMarket, isAdmin } from "@/server/markets";
+import { AutoRulePanel } from "@/components/auto-rule-panel";
 import { marketActivity, oddsSeries, positions, topHolders, type Position } from "@/server/portfolio";
 import { ResolveBox } from "@/components/resolve-box";
 import Link from "next/link";
@@ -104,6 +105,16 @@ async function Market({
           </div>
 
           <OutcomeRows outcomes={outcomes} binary={binary} />
+
+          {market.auto_rule && (
+            <Suspense fallback={<div className="h-28 animate-pulse rounded-2xl border border-line bg-panel" />}>
+              <AutoRulePanel
+                ruleJson={market.auto_rule}
+                settled={!["live", "closed"].includes(market.status)}
+                admin={Boolean(user && isAdmin(user))}
+              />
+            </Suspense>
+          )}
 
           {market.course === "Union" && (
             <Suspense fallback={<div className="h-48 animate-pulse rounded-2xl border border-line bg-panel" />}>
