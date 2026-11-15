@@ -29,4 +29,10 @@ resources:
             scope: the-curve
             key: admin_emails
             permission: READ
+        # Union staff who can see /partners (comma-separated sign-in emails); "none" until a partner is onboarded.
+        - name: partner-emails
+          secret:
+            scope: the-curve
+            key: partner_emails
+            permission: READ
       # Team access comes from the prod target's top-level permissions (users: CAN_MANAGE) in databricks.yml.

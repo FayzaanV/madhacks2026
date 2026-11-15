@@ -110,6 +110,17 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 
 ---
 
+## 2b. Union markets (live venue data, enterprise-ready)
+
+Markets about the Wisconsin Union ("Will the Sett be at least 80% full at 7pm?", "Will the Strada wait hit 6+ min at noon?", "Will Strada sell 270+ items by 2pm?") that **open and settle themselves from data**. Page: `/union` (tab "Union"); partner dashboard: `/partners`.
+
+- **Data sources, in settlement priority:** `partner` (the Union point of sale / any system pushing `POST /api/partner/metrics` with a Bearer key) → `occuspace` (Waitz/Occuspace Wi-Fi sensors, already deployed in the Terrace, Rathskeller and Sett; needs a token from the Union in secret `the-curve/occuspace_token`, adapter in `databricks/lib/occuspace.py` is **unverified until we have one**) → `sim` (simulated feed, `databricks/lib/venues.py`, `is_simulated = true`, labeled in the UI). If none covers a window: median of 3+ student check-ins (`venue_reports`); otherwise the market is **voided**.
+- **Tables (Lakebase):** `venues`, `venue_metrics` (append-only; metrics `people`, `occupancy_pct`, `wait_min`, `line_len`, `sales` = cumulative today), `venue_reports`, `market_rules` (venue, metric, op, threshold, window, agg avg/max/last), `partners` (API key SHA-256 only; never synced). Union markets are ordinary binary markets with `course = 'Union'`, created by system user `yomi_union`.
+- **Jobs:** `yomi-union-markets` (daily 6am CT, `41_union_markets.py`) opens one market per template in `databricks/lib/union.py`; threshold = median of the same window on past days (same weekday when possible) so markets open near 50/50; trading closes 15 min before the window. `yomi-refresh` now starts with `40_union_feed.py` (sensor or simulated readings) and `42_union_settle.py` (decide + pay out), every 15 min; the sync runs even if those fail (`run_if: ALL_DONE`). Settlement uses `union.settle`, which **must stay identical to `resolveMarket`** in `markets.ts` (same lock order and credits; tested in `test_union.py`).
+- **Gold:** `venue_baselines` (p25/p50/p75 by weekday and hour), `union_forecasts`, `union_market_scores`, `union_accuracy` (crowd vs venue-history Brier per venue: the partner scorecard).
+- **Partners:** admins create/revoke keys on `/partners` (key shown once). `GET /api/partner/forecasts` returns the crowd forecast; on Databricks the gold tables can be shared with Delta Sharing (if enabled on the workspace). Union staff see `/partners` via secret `the-curve/partner_emails`.
+- **Lakebase writes from jobs** run as whoever deployed last, who therefore needs a Lakebase Postgres role.
+
 ## 3. Secondary features (stretch — only after core works)
 
 - **Waitlist Odds:** multi-factor model (enrollment appointment time, credits/class standing, major and reserved seats, waitlist position, section size, historical drop rate, days to drop deadline, live market prices as an input). Trained and logged in MLflow.
@@ -167,6 +178,10 @@ Every market has an **AI market analyst** panel. It explains the market; it neve
 | DELETE | `/api/me` | ✓ | delete account (anonymized, trades kept) |
 | GET | `/api/markets?q=&status=` | – | markets with live prices |
 | POST | `/api/markets` | ✓ admin | `{question, course, market_type: "binary"\|"multiple_choice", outcomes?, closes_at, resolution_source?, liquidity_b?, not_about_a_student: true}` → `{marketId}` |
+| POST | `/api/venues/:id/reports` | ✓ | `{metric: "wait_min"\|"line_len", value}` → student check-in (1 per venue per 15 min) |
+| POST | `/api/partner/metrics` | Bearer partner key | `[{venue_id, metric, value, observed_at}]` (≤ 1000) → `{accepted, duplicates}` |
+| GET | `/api/partner/forecasts` | Bearer partner key | crowd chance of Yes for your venues' Union markets, last 7 days |
+| POST / DELETE | `/api/partners` / `/api/partners/:id` | ✓ admin | create a partner key `{name, venue_ids}` (returned once) / revoke |
 | GET | `/api/markets/:id` | – | market, Smart Money, AI insight |
 | POST | `/api/markets/:id/trade` | ✓ | buy `{outcome, amount}` (whole Clout) · sell `{side:"sell", outcome, clout}` (whole Clout to receive) or `{side:"sell", outcome, all:true}`; 400 after `closes_at` |
 | GET / POST | `/api/markets/:id/comments?before=` | – / ✓ | `{comments, next, total}`, 50 per page newest first / add |
@@ -234,9 +249,9 @@ Catalog: **`the_curve`**
 
 | Schema | Tables |
 |---|---|
-| `bronze` | `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
-| `silver` | `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
-| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_clout_history` (true Clout after each sell/resolution, for the portfolio chart), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights` |
+| `bronze` | `venues_raw`, `venue_metrics_raw`, `venue_reports_raw`, `market_rules_raw`, `schools_raw`, `sessions_raw`, `users_raw`, `markets_raw`, `outcomes_raw`, `trades_raw`, `resolutions_raw`, `disputes_raw`, `comments_raw`, `ai_questions_raw` |
+| `silver` | `venues`, `venue_metrics` (with Madison `local_ts`), `market_rules`, `schools`, `users`, `markets`, `outcomes` (with crowd price), `trades_enriched` (trade + market + user + post-trade price), `resolutions` |
+| `gold` | `school_rankings`, `user_clout`, `user_calibration` (bucketed curve; `user_id='__all__'` = campus), `user_clout_history` (true Clout after each sell/resolution, for the portfolio chart), `user_market_brier`, `user_brier`, `user_course_clout`, `clout_drift` (ledger vs gold balance; should be empty), `leaderboard` (scope: overall/course/major/dorm/club, incl. `rank_from_bottom`), `market_smart_money`, `market_mispricing`, `market_price_history`, `user_flair`, `market_ai_insights`, `venue_baselines`, `union_forecasts`, `union_market_scores`, `union_accuracy` |
 | `ml` | feature tables + registered models: `the_curve.ml.market_accuracy`, `the_curve.ml.waitlist_odds` |
 | `ai` | `syllabus_uploads`, `generated_markets`, `resolver_suggestions` |
 

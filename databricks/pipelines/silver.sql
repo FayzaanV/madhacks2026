@@ -56,3 +56,23 @@ COMMENT 'Universities (listed + discovered from .edu sign-ups)'
 AS SELECT school_id, name, short_name, domain, color, is_listed
 FROM the_curve.bronze.schools_raw
 QUALIFY ROW_NUMBER() OVER (PARTITION BY school_id ORDER BY ingested_at DESC) = 1;
+
+-- Union markets: venues, live venue readings and settlement rules (see databricks/lib/union.py).
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.venues
+COMMENT 'Wisconsin Union venues (latest row per venue)'
+AS SELECT venue_id, name, building, capacity, sensor, external_id, is_simulated
+FROM the_curve.bronze.venues_raw
+QUALIFY ROW_NUMBER() OVER (PARTITION BY venue_id ORDER BY ingested_at DESC) = 1;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.venue_metrics
+COMMENT 'Venue readings: sensor (occuspace), partner point of sale (partner) or simulated feed (sim); local_ts in Madison time'
+AS SELECT venue_id, metric, CAST(value AS DOUBLE) AS value, observed_at,
+          from_utc_timestamp(observed_at, 'America/Chicago') AS local_ts, source, is_simulated
+FROM the_curve.bronze.venue_metrics_raw
+QUALIFY ROW_NUMBER() OVER (PARTITION BY venue_id, metric, source, observed_at ORDER BY ingested_at DESC) = 1;
+
+CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.market_rules
+COMMENT 'How each Union market settles: aggregate the metric over the window and compare with the threshold'
+AS SELECT market_id, venue_id, metric, op, threshold, window_start, window_end, agg
+FROM the_curve.bronze.market_rules_raw
+QUALIFY ROW_NUMBER() OVER (PARTITION BY market_id ORDER BY ingested_at DESC) = 1;

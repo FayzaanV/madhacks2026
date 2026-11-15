@@ -60,6 +60,12 @@ with conn.cursor() as cur:
         print(f"{pg}: {len(rows)} rows")
 conn.commit()
 
+# Re-apply the (idempotent) schema: the TRUNCATE above cascades to Union markets/rules/check-ins and removes the
+# yomi_union system user; this restores the user. Venues and venue_metrics are kept; union_markets recreates markets.
+with conn.cursor() as cur:
+    cur.execute(schema_sql)
+conn.commit()
+
 with conn.cursor() as cur:
     cur.execute("SELECT (SELECT count(*) FROM users), (SELECT count(*) FROM trades), (SELECT count(*) FROM markets)")
     print("users, trades, markets =", cur.fetchone())

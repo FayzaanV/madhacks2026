@@ -15,6 +15,8 @@ import { marketActivity, oddsSeries, positions, topHolders, type Position } from
 import { ResolveBox } from "@/components/resolve-box";
 import Link from "next/link";
 import { currentUser } from "@/server/user";
+import { RuleChart } from "@/components/rule-chart";
+import { marketRule, METRIC_LABEL } from "@/server/union";
 
 const ago = (iso: string) => {
   const s = (Date.now() - Date.parse(iso)) / 1000;
@@ -92,6 +94,12 @@ async function Market({
           </div>
 
           <OutcomeRows outcomes={outcomes} binary={binary} />
+
+          {market.course === "Union" && (
+            <Suspense fallback={<div className="h-48 animate-pulse rounded-2xl border border-line bg-panel" />}>
+              <HowItSettles id={id} />
+            </Suspense>
+          )}
 
           <Suspense fallback={<div className="h-40 animate-pulse rounded-2xl border border-line bg-panel" />}>
             <Bets id={id} labels={labels} />
@@ -262,6 +270,35 @@ function HolderGrid({ labels, holders }: { labels: string[]; holders: Awaited<Re
         );
       })}
     </div>
+  );
+}
+
+const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
+/** Union markets settle themselves: show the rule, where the data comes from, and the metric vs the threshold. */
+async function HowItSettles({ id }: { id: string }) {
+  const r = await marketRule(id);
+  if (!r) return null;
+  const unit = r.metric === "occupancy_pct" ? "%" : r.metric === "wait_min" ? " min" : "";
+  const aggWord = r.agg === "max" ? "peak" : r.agg === "last" ? "reading at the end of" : "average";
+  const src = r.sources.includes("partner") ? "the Union point of sale" : r.sources.includes("occuspace") ? "Occuspace sensors" : "the simulated venue feed";
+  return (
+    <section className="rounded-2xl border border-line bg-panel p-4 text-sm">
+      <h2 className="font-semibold">How this settles</h2>
+      <p className="mt-1">
+        Yes if the <b>{aggWord}</b> {METRIC_LABEL[r.metric]} at <b>{r.venue}</b> between {fmtTime(r.window_start)} and {fmtTime(r.window_end)} is{" "}
+        <b>{r.op === ">=" ? "at least" : "below"} {r.threshold}{unit}</b>. Settled automatically by a Databricks job from {src}
+        {" "}(partner data first, then sensors; student check-ins if neither covers the window; otherwise voided).
+      </p>
+      {r.baseline && (
+        <p className="mt-1 text-xs text-muted">
+          Typical for this weekday and hour (last 28 days, gold): {Math.round(r.baseline.p25)}–{Math.round(r.baseline.p75)}{unit}, median {Math.round(r.baseline.p50)}{unit}.
+        </p>
+      )}
+      <div className="mt-3">
+        <RuleChart series={r.series.filter((p) => p.source === (r.sources.includes("partner") ? "partner" : r.sources.includes("occuspace") ? "occuspace" : "sim"))} threshold={r.threshold} unit={unit} />
+      </div>
+    </section>
   );
 }
 

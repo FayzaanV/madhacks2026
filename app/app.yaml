@@ -11,6 +11,8 @@ env:
     valueFrom: refresh-job
   - name: ADMIN_EMAILS            # admins create + resolve markets (secret the-curve/admin_emails; never in the repo)
     valueFrom: admin-emails
+  - name: PARTNER_EMAILS          # Union staff for /partners (secret the-curve/partner_emails)
+    valueFrom: partner-emails
   - name: LAKEBASE_ENDPOINT
     value: projects/the-curve-ledger/branches/production/endpoints/primary
   # Demo mode: sign-in links are shown on screen (no email). Acceptable ONLY because Databricks Apps already

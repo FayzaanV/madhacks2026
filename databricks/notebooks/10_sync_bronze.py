@@ -29,8 +29,13 @@ TABLES = {  # postgres table -> bronze table
     "sessions": "sessions_raw",
     "schools": "schools_raw",          # session_hash is dropped below; login_tokens are never synced
     "course_staff": "course_staff_raw",
+    "venues": "venues_raw", "market_rules": "market_rules_raw",  # partners (API key hashes) are never synced
+    "venue_metrics": "venue_metrics_raw", "venue_reports": "venue_reports_raw",
 }
-APPEND_ONLY = {"trades": "trade_id", "ai_questions": "question_id"}  # table -> primary key
+APPEND_ONLY = {  # table -> primary key columns
+    "trades": ["trade_id"], "ai_questions": ["question_id"], "venue_reports": ["report_id"],
+    "venue_metrics": ["venue_id", "metric", "source", "observed_at"],
+}
 OVERLAP = "INTERVAL 1 HOUR"
 # Never leave Lakebase: secrets/PII for sessions, and avatar image bytes (no analytics use; keeps bronze small).
 DROP_COLS = {"sessions": {"session_hash", "email"}, "users": {"avatar", "avatar_type"}}
@@ -62,7 +67,7 @@ for pg, bronze in TABLES.items():
         since = spark.table(target).agg(F.max("created_at")).first()[0]
         new = df if since is None else df.where(F.col("created_at") >= F.lit(since) - F.expr(OVERLAP))
         (DeltaTable.forName(spark, target).alias("b")
-         .merge(new.alias("s"), f"b.{key} = s.{key}")
+         .merge(new.alias("s"), " AND ".join(f"b.{k} = s.{k}" for k in key))
          .whenNotMatchedInsertAll()
          .execute())
         print(f"{ledger}.public.{pg} -> {target}: merged {new.count()} recent rows (incremental)")

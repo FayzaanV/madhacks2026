@@ -199,3 +199,77 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar bytea;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_type text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS title text;  -- chosen from earned titles (app/src/core/titles.ts)
+
+-- ------------------------------------------------------------------ Union markets (live venue data)
+-- Venues: Wisconsin Union spaces. Edit rows here for a real deployment (external_id = the Occuspace space id).
+CREATE TABLE IF NOT EXISTS venues (
+  venue_id     text PRIMARY KEY,
+  name         text NOT NULL,
+  building     text NOT NULL,
+  capacity     int  NOT NULL,
+  sensor       text NOT NULL DEFAULT 'none' CHECK (sensor IN ('occuspace', 'none')),
+  external_id  text,
+  is_simulated boolean NOT NULL DEFAULT false,
+  created_at   timestamptz NOT NULL DEFAULT now()
+);
+INSERT INTO venues (venue_id, name, building, capacity, sensor) VALUES
+  ('terrace', 'Memorial Union Terrace', 'Memorial Union', 1200, 'occuspace'),
+  ('rathskeller', 'Rathskeller', 'Memorial Union', 400, 'occuspace'),
+  ('sett', 'The Sett', 'Union South', 600, 'occuspace'),
+  ('strada', 'Strada', 'Wisconsin Union', 80, 'none')
+ON CONFLICT (venue_id) DO NOTHING;
+
+-- Append-only readings: sensors (occuspace), the partner API (partner, e.g. point-of-sale sales and waits),
+-- or the simulated feed (sim, is_simulated = true) until a partner plugs in.
+CREATE TABLE IF NOT EXISTS venue_metrics (
+  venue_id     text NOT NULL REFERENCES venues(venue_id),
+  metric       text NOT NULL CHECK (metric IN ('people', 'occupancy_pct', 'wait_min', 'line_len', 'sales')),
+  value        double precision NOT NULL,
+  observed_at  timestamptz NOT NULL,
+  source       text NOT NULL CHECK (source IN ('occuspace', 'partner', 'sim')),
+  is_simulated boolean NOT NULL DEFAULT false,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (venue_id, metric, source, observed_at)
+);
+CREATE INDEX IF NOT EXISTS venue_metrics_time_idx ON venue_metrics (venue_id, metric, observed_at);
+
+-- Student check-ins (fallback when no sensor or partner covers a market's window).
+CREATE TABLE IF NOT EXISTS venue_reports (
+  report_id  text PRIMARY KEY,
+  venue_id   text NOT NULL REFERENCES venues(venue_id),
+  user_id    text NOT NULL REFERENCES users(user_id),
+  metric     text NOT NULL CHECK (metric IN ('wait_min', 'line_len')),
+  value      double precision NOT NULL CHECK (value >= 0 AND value <= 240),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS venue_reports_idx ON venue_reports (venue_id, metric, created_at);
+CREATE INDEX IF NOT EXISTS venue_reports_user_idx ON venue_reports (user_id, venue_id, created_at);
+
+-- How a Union market settles (databricks/lib/union.py evaluate): aggregate the metric over the window, compare.
+CREATE TABLE IF NOT EXISTS market_rules (
+  market_id    text PRIMARY KEY REFERENCES markets(market_id) ON DELETE CASCADE,
+  venue_id     text NOT NULL REFERENCES venues(venue_id),
+  metric       text NOT NULL,
+  op           text NOT NULL CHECK (op IN ('>=', '<')),
+  threshold    double precision NOT NULL,
+  window_start timestamptz NOT NULL,
+  window_end   timestamptz NOT NULL,
+  agg          text NOT NULL CHECK (agg IN ('avg', 'max', 'last'))
+);
+
+-- Enterprise partners (e.g. the Wisconsin Union) pushing data through /api/partner/metrics.
+-- Only the SHA-256 of each API key is stored; never synced to bronze.
+CREATE TABLE IF NOT EXISTS partners (
+  partner_id   text PRIMARY KEY,
+  name         text NOT NULL,
+  api_key_hash text UNIQUE NOT NULL,
+  venue_ids    text[] NOT NULL,
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  revoked_at   timestamptz,
+  last_used_at timestamptz
+);
+
+-- System account that creates and settles Union markets (not a person, not simulated).
+INSERT INTO users (user_id, handle, email, handle_chosen_at)
+VALUES ('u-yomi-union', 'yomi_union', 'union-bot@yomi.invalid', now())
+ON CONFLICT (user_id) DO NOTHING;
