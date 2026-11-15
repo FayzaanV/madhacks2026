@@ -10,6 +10,8 @@ import { listMarkets, type Market } from "@/server/markets";
 import { oddsSeries } from "@/server/portfolio";
 import { leaderboard } from "@/server/leaderboard";
 import { querySql } from "@/server/warehouse";
+import { UNIVERSITIES } from "@/core/universities";
+import { currentUser } from "@/server/user";
 
 type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
 type Leader = { user_id: string; handle: string; clout: number; rank: number; is_simulated: boolean };
@@ -50,6 +52,7 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   const sp = await searchParams;
   const cat = typeof sp.cat === "string" ? sp.cat : "";
   const q = typeof sp.q === "string" ? sp.q : "";
+  const me = await currentUser();
   const [markets, awaiting, gaps, board] = await Promise.all([
     listMarkets("live"),
     listMarkets("awaiting"),
@@ -57,8 +60,9 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
       "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
     ).catch(() => [] as Gap[]),
     // Live from the Lakebase ledger (plain SQL sort, no warehouse): server/leaderboard.ts. Top 5 and bottom 5 in one call.
-    leaderboard("overall", "all", 5, 5),
+    leaderboard("overall", "all", 5, 5, me?.school_id ?? null),
   ]);
+  const where = me ? (UNIVERSITIES.find((u) => u.school_id === me.school_id)?.short_name ?? me.school_id.replace(/^edu-/, "")) : null;
   const leaders: Leader[] = board.top;
   // `shame` comes back lowest-first; show the five lowest with the highest of them on top, like the top list.
   const bottom: Leader[] = board.shame;
@@ -72,10 +76,10 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
         <section className="grid gap-4 lg:grid-cols-[1fr_340px]">
           <Featured m={featured} gap={gaps[0]} />
           <aside className="flex flex-col gap-4">
-            <SideList title="Top 5 forecasters" subtitle="Highest Clout overall" href="/leaderboard?scope=overall">
+            <SideList title="Top 5 forecasters" subtitle={where ? `Highest Clout at ${where}` : "Highest Clout overall"} href="/leaderboard?scope=overall">
               <LeaderRows rows={leaders} />
             </SideList>
-            <SideList title="Bottom 5 forecasters" subtitle="Lowest Clout overall" href="/leaderboard?scope=overall">
+            <SideList title="Bottom 5 forecasters" subtitle={where ? `Lowest Clout at ${where}` : "Lowest Clout overall"} href="/leaderboard?scope=overall">
               <LeaderRows rows={bottom} />
             </SideList>
           </aside>
