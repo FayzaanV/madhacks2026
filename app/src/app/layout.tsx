@@ -15,11 +15,11 @@ export const metadata: Metadata = {
 function Logo() {
   return (
     <Link href="/" className="flex shrink-0 items-center gap-2.5 font-extrabold tracking-tight">
-      <svg viewBox="0 0 24 24" className="h-8 w-8 text-accent drop-shadow-sm" aria-hidden>
+      {/* <svg viewBox="0 0 24 24" className="h-8 w-8 text-accent drop-shadow-sm" aria-hidden>
         <rect x="1" y="1" width="22" height="22" rx="6" fill="currentColor" />
         <path d="M5 17 C9 17 9 7 13 7 S17 12 19 9" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" />
-      </svg>
-      <span className="text-xl tracking-tight">Yomi</span>
+      </svg> */}
+      <span className="text-4xl tracking-tight">Yomi</span>
     </Link>
   );
 }
