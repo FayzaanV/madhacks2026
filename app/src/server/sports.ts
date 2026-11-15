@@ -1,5 +1,6 @@
 import "server-only";
 import type { PoolClient } from "pg";
+import { prices } from "@/core/lmsr";
 import { marketsForGame, parseEvent, resolveOutcome, scoreLine, SPORTS, totalLine, type Game, type SportKey } from "@/core/sports";
 import { UNIVERSITIES } from "@/core/universities";
 import { q, tx } from "./ledger";
@@ -9,12 +10,12 @@ import { settleMarket } from "./markets";
  * Varsity sports, from ESPN's public (unofficial, keyless) scoreboard JSON. May change without notice.
  *   syncSchedules: every team schedule for listed Big Ten schools -> sports_games (hourly)
  *   pollLive:      today's scoreboards for sports with a game on -> live scores (every minute)
- *   createMarkets: winner / total / margin / overtime markets for games in the next 4 days
+ *   createMarkets: winner / total / margin / overtime markets for games in the next 8 days
  *   settleFinished: settle auto-resolve markets whose game is final (or postponed/canceled -> void)
  */
 const ESPN = "https://site.api.espn.com/apis/site/v2/sports";
 export const SPORTS_BOT = "u-yomi-sports";
-const CREATE_AHEAD_DAYS = 4;
+const CREATE_AHEAD_DAYS = 8; // a week+ ahead, so next weekend's football is always open for betting
 const BIG_TEN = UNIVERSITIES.filter((u) => u.espn_id && u.conference === "big-ten");
 
 async function espn<T>(path: string): Promise<T> {
@@ -161,7 +162,7 @@ async function insertMarket(c: PoolClient, g: Game, spec: ReturnType<typeof mark
   return true;
 }
 
-/** Markets for upcoming games (next 4 days) that don't have them yet. Trading closes at kickoff. */
+/** Markets for upcoming games (next CREATE_AHEAD_DAYS days) that don't have them yet. Trading closes at kickoff. */
 export async function createMarkets() {
   const rows = await q<GameRow>(
     `SELECT g.* FROM sports_games g
@@ -215,12 +216,28 @@ export async function settleFinished() {
 // ------------------------------------------------------------------ reads for the UI / API
 /** pg returns timestamptz as Date; the UI and JSON want ISO strings. */
 const iso = (v: string | Date) => new Date(v).toISOString();
-export type SportsGame = GameRow & { score_line: string; markets: { market_id: string; market_kind: string; status: string }[] };
+export type GameMarket = {
+  market_id: string;
+  market_kind: string;
+  status: string;
+  open: boolean; // live and before kickoff
+  outcomes: { label: string; price: number }[];
+};
+export type SportsGame = GameRow & { score_line: string; markets: GameMarket[] };
+
+type RawGameMarket = Omit<GameMarket, "outcomes"> & { liquidity_b: number; outcomes: { label: string; q: number }[] };
+const priced = (m: RawGameMarket): GameMarket => {
+  const p = prices(m.outcomes.map((o) => o.q), m.liquidity_b);
+  return { market_id: m.market_id, market_kind: m.market_kind, status: m.status, open: m.open, outcomes: m.outcomes.map((o, i) => ({ label: o.label, price: p[i] })) };
+};
 
 export async function listGames(opts: { sport?: string; school?: string; days?: number } = {}): Promise<SportsGame[]> {
-  const rows = await q<GameRow & { markets: SportsGame["markets"] | null }>(
-    `SELECT g.*, (SELECT json_agg(json_build_object('market_id', m.market_id, 'market_kind', m.market_kind, 'status', m.status)
-                                  ORDER BY m.market_kind)
+  const rows = await q<GameRow & { markets: RawGameMarket[] | null }>(
+    `SELECT g.*, (SELECT json_agg(json_build_object('market_id', m.market_id, 'market_kind', m.market_kind, 'status', m.status,
+                                    'open', m.status = 'live' AND m.closes_at > now(), 'liquidity_b', m.liquidity_b,
+                                    'outcomes', (SELECT json_agg(json_build_object('label', o.label, 'q', o.q_shares) ORDER BY o.outcome_index)
+                                                 FROM outcomes o WHERE o.market_id = m.market_id))
+                                  ORDER BY array_position(ARRAY['winner','total','margin','overtime'], m.market_kind))
                   FROM markets m WHERE m.event_ref = g.event_id) AS markets
      FROM sports_games g
      WHERE g.starts_at > now() - interval '3 days' AND g.starts_at < now() + make_interval(days => $3)
@@ -228,7 +245,7 @@ export async function listGames(opts: { sport?: string; school?: string; days?: 
      ORDER BY (g.state = 'in') DESC, abs(extract(epoch FROM g.starts_at - now())) LIMIT 200`,
     [opts.sport ?? null, opts.school ?? null, opts.days ?? 7],
   );
-  return rows.map((r) => ({ ...r, starts_at: iso(r.starts_at), markets: r.markets ?? [], score_line: scoreLine(rowToGame(r)) }));
+  return rows.map((r) => ({ ...r, starts_at: iso(r.starts_at), markets: (r.markets ?? []).map(priced), score_line: scoreLine(rowToGame(r)) }));
 }
 
 export async function getGame(eventId: string): Promise<SportsGame | null> {

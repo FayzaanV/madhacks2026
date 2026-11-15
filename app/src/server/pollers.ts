@@ -25,15 +25,47 @@ async function holdLease(name: string): Promise<boolean> {
 let lastSchedule = 0;
 let running = false;
 
+/** Can this instance reach ESPN? (Databricks Apps on Free Edition has no outbound internet.) */
+async function espnReachable(): Promise<boolean> {
+  try {
+    const r = await fetch("https://site.api.espn.com/apis/site/v2/sports/football/college-football/teams/275", {
+      headers: { "User-Agent": "Mozilla/5.0 (Yomi sports poller)" },
+      signal: AbortSignal.timeout(8_000),
+      cache: "no-store",
+    });
+    return r.ok;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One pass. Two independent leases:
+ *  - "intramurals": auto-confirm overdue reports (only needs Lakebase, so the deployed app always can).
+ *  - "sports": ESPN fetch + create + settle. Only taken by an instance that can reach ESPN, so an instance
+ *    without internet (the Databricks App on Free Edition) never blocks one that has it (a teammate's machine).
+ */
 export async function tick(): Promise<Record<string, unknown> | null> {
   if (running) return null;
   running = true;
   try {
     return await inBackground(async () => {
-      if (!(await holdLease("sports"))) return { skipped: "another instance holds the lease" };
-      const sports = await import("./sports");
-      const im = await import("./intramurals");
       const out: Record<string, unknown> = {};
+      if (await holdLease("intramurals")) {
+        const im = await import("./intramurals");
+        out.imAutoConfirmed = await im.autoConfirmDue();
+        // Simulated test markets: settle closed ones and keep open ones moving (also pinged by /api/sim/tick).
+        out.test = await (await import("./testmarkets")).simTick();
+      }
+      if (!(await espnReachable())) {
+        out.sports = "skipped: ESPN not reachable from this instance";
+        return out;
+      }
+      if (!(await holdLease("sports"))) {
+        out.sports = "skipped: another instance holds the lease";
+        return out;
+      }
+      const sports = await import("./sports");
       if (Date.now() - lastSchedule > SCHEDULE_EVERY_MS) {
         out.scheduleGames = await sports.syncSchedules();
         lastSchedule = Date.now();
@@ -41,9 +73,6 @@ export async function tick(): Promise<Record<string, unknown> | null> {
       out.live = await sports.pollLive();
       out.created = await sports.createMarkets();
       out.settled = await sports.settleFinished();
-      out.imAutoConfirmed = await im.autoConfirmDue();
-      // Simulated test markets: settle closed ones and keep open ones moving (also pinged by /api/sim/tick).
-      out.test = await (await import("./testmarkets")).simTick();
       return out;
     });
   } catch (e) {
@@ -90,7 +119,8 @@ export function startPollers() {
   console.log(`[pollers] started as ${HOLDER}`);
   const run = () =>
     void tick().then((r) => {
-      if (r && Object.keys(r).some((k) => k !== "skipped")) console.log("[pollers]", JSON.stringify(r));
+      // Log only passes that did something (or failed), not routine skips.
+      if (r && (r.error || r.scheduleGames || r.created || r.settled || r.imAutoConfirmed)) console.log("[pollers]", JSON.stringify(r));
     });
   setTimeout(run, 5_000);
   setInterval(run, TICK_MS).unref?.();
