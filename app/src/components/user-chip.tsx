@@ -3,6 +3,7 @@ import { displayTitle } from "@/core/titles";
 import { isAdmin } from "@/server/markets";
 import { currentUser } from "@/server/user";
 import { Avatar } from "./avatar";
+import { nameClass } from "./cosmetics";
 import { SignOutButton } from "./login-form";
 
 export async function UserChip() {
@@ -37,9 +38,9 @@ export async function UserChip() {
         {clout.toLocaleString()} <span className="font-normal opacity-80">Clout</span>
       </Link>
       <Link href="/me" className="flex items-center gap-2 rounded-xl px-1.5 py-1 hover:bg-panel-2" aria-label="Your profile">
-        <Avatar userId={u.user_id} handle={u.handle} v={u.avatar_v} size={32} />
+        <Avatar userId={u.user_id} handle={u.handle} v={u.avatar_v} size={32} look={u.look} />
         <span className="hidden flex-col leading-tight lg:flex">
-          <span className="text-sm font-semibold">@{u.handle}</span>
+          <span className={`text-sm font-semibold ${nameClass(u.look)}`}>@{u.handle}</span>
           {/* Header uses tier titles only; flair needs a gold query, so it's validated on /me instead. */}
           <span className="text-[11px] text-accent">{u.title ?? displayTitle(null, clout)}</span>
         </span>

@@ -38,6 +38,13 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               <Link href="/leaderboard" className="rounded-lg px-3 py-1.5 text-muted hover:bg-panel-2 hover:text-ink">
                 Leaderboard
               </Link>
+              <Link
+                href="/shop"
+                className="rounded-lg px-3 py-1.5 font-semibold text-accent hover:bg-accent-soft"
+                title="Unlock hats, frames and name colors with your Clout"
+              >
+                <span aria-hidden>👑 </span>Shop
+              </Link>
               <Suspense fallback={<span className="px-3 text-sm text-muted">…</span>}>
                 <UserChip />
               </Suspense>

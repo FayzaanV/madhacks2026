@@ -137,7 +137,7 @@ async function Market({
           </Suspense>
 
           <Suspense fallback={<p className="text-sm text-muted">Loading comments…</p>}>
-            <Comments id={id} me={user ? { user_id: user.user_id, handle: user.handle, title: user.title, avatar_v: user.avatar_v, clout: user.clout + user.open_stake } : null} />
+            <Comments id={id} me={user ? { user_id: user.user_id, handle: user.handle, title: user.title, avatar_v: user.avatar_v, clout: user.clout + user.open_stake, look: user.look } : null} />
           </Suspense>
         </div>
 
@@ -263,8 +263,8 @@ function ActivityList({ rows, empty }: { rows: Awaited<ReturnType<typeof marketA
       {rows.map((a) => (
         <li key={a.trade_id} className="flex items-center gap-3 py-2">
           <ProfileLink userId={a.user_id}>
-            <Avatar userId={a.user_id} handle={a.handle} v={a.avatar_v} size={26} />
-            <PersonLine handle={a.handle} title={a.title} sim={a.is_simulated} />
+            <Avatar userId={a.user_id} handle={a.handle} v={a.avatar_v} size={26} look={a.look} />
+            <PersonLine handle={a.handle} title={a.title} sim={a.is_simulated} look={a.look} />
           </ProfileLink>
           <span className="ml-auto shrink-0 text-right">
             <span className={a.side === "buy" ? "text-yes" : "text-no"}>{a.side === "buy" ? "Bought" : "Sold"}</span>{" "}
@@ -291,8 +291,8 @@ function HolderGrid({ labels, holders }: { labels: string[]; holders: Awaited<Re
                 {hs.map((h) => (
                   <li key={h.user_id} className="flex items-center gap-2">
                     <ProfileLink userId={h.user_id}>
-                      <Avatar userId={h.user_id} handle={h.handle} v={h.avatar_v} size={22} />
-                      <PersonLine handle={h.handle} title={h.title} sim={h.is_simulated} />
+                      <Avatar userId={h.user_id} handle={h.handle} v={h.avatar_v} size={22} look={h.look} />
+                      <PersonLine handle={h.handle} title={h.title} sim={h.is_simulated} look={h.look} />
                     </ProfileLink>
                     <span className="tabular ml-auto">{h.shares.toFixed(1)} shares</span>
                   </li>

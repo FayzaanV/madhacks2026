@@ -54,3 +54,55 @@ body {
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
+
+/* ---------------------------------------------------------------- shop cosmetics (core/cosmetics.ts) */
+/* Frames: a ring just outside the avatar. Gradient border = padded background masked to the ring only. */
+.cos-frame {
+  position: absolute;
+  border-radius: 9999px;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+.frame-silver { background: linear-gradient(135deg, #f8fafc, #94a3b8 45%, #e2e8f0 60%, #64748b); }
+.frame-gold { background: linear-gradient(135deg, #fef08a, #ca8a04 45%, #fde047 60%, #a16207); }
+.frame-neon { background: #a855f7; animation: cos-pulse 1.6s ease-in-out infinite; }
+.frame-aurora { background: conic-gradient(#22d3ee, #a855f7, #f472b6, #facc15, #22d3ee); animation: cos-spin 4s linear infinite; }
+.frame-diamond {
+  background: linear-gradient(120deg, #e0f2fe, #7dd3fc 25%, #fff 40%, #38bdf8 60%, #e0f2fe 80%, #bae6fd);
+  background-size: 300% 300%;
+  animation: cos-shine 2.5s ease-in-out infinite;
+}
+@keyframes cos-pulse {
+  0%, 100% { filter: drop-shadow(0 0 1px #a855f7); opacity: 0.85; }
+  50% { filter: drop-shadow(0 0 4px #c084fc); opacity: 1; }
+}
+@keyframes cos-spin { to { transform: rotate(360deg); } }
+@keyframes cos-shine { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+/* Name colors */
+.name-badger { color: #c5050c; }
+.name-mendota { color: #1d4ed8; }
+.name-terrace { color: #ea580c; }
+.name-sunset, .name-aurora, .name-rainbow {
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+}
+.name-sunset { background-image: linear-gradient(90deg, #f97316, #ec4899); }
+.name-aurora {
+  background-image: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899, #06b6d4);
+  background-size: 300% 100%;
+  animation: cos-flow 4s linear infinite;
+}
+.name-rainbow {
+  background-image: linear-gradient(90deg, #ef4444, #f59e0b, #22c55e, #3b82f6, #a855f7, #ef4444);
+  background-size: 300% 100%;
+  animation: cos-flow 3s linear infinite;
+}
+@keyframes cos-flow { to { background-position: 300% 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .frame-neon, .frame-aurora, .frame-diamond, .name-aurora, .name-rainbow { animation: none; }
+}

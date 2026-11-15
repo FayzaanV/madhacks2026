@@ -4,7 +4,9 @@ import Link from "next/link";
 import { overallRank } from "@/server/leaderboard";
 import { querySql } from "@/server/warehouse";
 import { displayTitle } from "@/core/titles";
+import type { Look } from "@/core/cosmetics";
 import { Avatar } from "./avatar";
+import { nameClass } from "./cosmetics";
 import { Clout } from "./clout";
 
 type Stats = { school_id: string | null; clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null };
@@ -17,12 +19,14 @@ export async function Profile({
   liveClout,
   title,
   avatarV,
+  look,
 }: {
   userId: string;
   handle: string;
   liveClout?: number;
   title?: string | null;
   avatarV?: number | null;
+  look?: Look;
 }) {
   const [stats, bins, flair, rank] = await Promise.all([
     querySql<Stats>(
@@ -46,10 +50,10 @@ export async function Profile({
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-wrap items-end gap-4">
-        <Avatar userId={userId} handle={handle} v={avatarV} size={80} />
+      <section className="flex flex-wrap items-end gap-4 pt-8">
+        <Avatar userId={userId} handle={handle} v={avatarV} size={80} look={look} />
         <div>
-          <h1 className="text-2xl font-bold">@{handle}</h1>
+          <h1 className={`text-2xl font-bold ${nameClass(look)}`}>@{handle}</h1>
           <div className="text-sm font-semibold text-accent">{displayTitle(title, clout, flair.map((f) => f.flair))}</div>
           {s?.school_id && (
             <Link href={`/leaderboard?scope=school&value=${encodeURIComponent(s.school_id)}`} className="text-sm text-muted hover:text-accent">

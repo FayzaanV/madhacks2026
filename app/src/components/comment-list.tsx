@@ -3,11 +3,12 @@
 import { fmtDateTime } from "@/core/time";
 import Link from "next/link";
 import { useState } from "react";
+import type { Look } from "@/core/cosmetics";
 import type { Comment, CommentPage } from "@/server/markets";
 import { Avatar, PersonLine } from "./avatar";
 import { Clout } from "./clout";
 
-type Me = { user_id: string; handle: string; title: string | null; avatar_v: number | null; clout: number } | null;
+type Me = { user_id: string; handle: string; title: string | null; avatar_v: number | null; clout: number; look: Look } | null;
 
 /**
  * Market comments: scrollable, newest first, 50 at a time with "Load older comments" (nothing silently drops off).
@@ -85,15 +86,15 @@ export function CommentList({ marketId, initial, me }: { marketId: string; initi
       )}
       {error && <p className="mt-1 text-sm text-no">{error}</p>}
 
-      <div className="mt-3 max-h-[480px] overflow-y-auto pr-1">
+      <div className="mt-3 max-h-[480px] overflow-y-auto pr-1 pt-2">
         {comments.length === 0 && <p className="py-4 text-center text-sm text-muted">No comments yet. Start the conversation.</p>}
         <ul className="divide-y divide-line">
           {comments.map((c) => (
             <li key={c.comment_id} className="flex gap-2.5 py-2.5 text-sm">
-              <Avatar userId={c.user_id} handle={c.handle} v={c.avatar_v} size={28} />
+              <Avatar userId={c.user_id} handle={c.handle} v={c.avatar_v} size={28} look={c.look} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-xs">
-                  <PersonLine handle={c.handle} title={c.title} sim={c.is_simulated} />
+                  <PersonLine handle={c.handle} title={c.title} sim={c.is_simulated} look={c.look} />
                   <Clout value={c.clout} className="text-xs" />
                   <span className="text-muted">{fmtDateTime(c.created_at)}</span>
                   {me?.user_id === c.user_id && (

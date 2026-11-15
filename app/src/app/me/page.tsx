@@ -23,7 +23,7 @@ async function Me() {
   const flair = (await userFlair(u.user_id)).map((f) => f.flair);
   return (
     <div className="space-y-6">
-      <Profile userId={u.user_id} handle={u.handle} liveClout={clout} title={u.title} avatarV={u.avatar_v} />
+      <Profile userId={u.user_id} handle={u.handle} liveClout={clout} title={u.title} avatarV={u.avatar_v} look={u.look} />
       <div className="grid gap-4 md:grid-cols-2">
         <section className="rounded-2xl border border-line bg-panel p-4">
           <h2 className="mb-3 font-semibold">Profile picture</h2>

@@ -2,7 +2,6 @@ import "server-only";
 import { activeLook, equip, ITEMS, type Look, type Slot } from "@/core/cosmetics";
 import { AuthError } from "./auth";
 import { openStakeSql, q } from "./ledger";
-import { querySql } from "./warehouse";
 
 /**
  * Shop cosmetics. users.cosmetics stores what you picked per slot; what actually shows is worked out from your true
@@ -52,16 +51,18 @@ export async function equipItem(
 }
 
 /**
- * Databricks touch: share of real forecasters who currently own each item, from gold.user_clout (true Clout as the
- * pipeline computes it). Empty in local mode or if gold isn't reachable; the shop just hides the stat.
+ * Share of real forecasters (1+ trade) who currently own each item, from true Clout in the Lakebase ledger. Plain SQL
+ * on the ledger rather than gold, so the shop never wakes the SQL warehouse (same reasoning as server/leaderboard.ts).
  */
 export async function unlockRates(): Promise<Record<string, number>> {
   const cols = ITEMS.map((it, i) => {
-    const cond = it.max !== undefined ? `c.clout <= ${it.max}` : `c.clout >= ${it.min}`;
-    return `avg(CASE WHEN ${cond} THEN 1.0 ELSE 0 END) AS i${i}`;
+    const cond = it.max !== undefined ? `c <= ${it.max}` : `c >= ${it.min}`;
+    return `avg(CASE WHEN ${cond} THEN 1.0 ELSE 0 END)::float AS i${i}`;
   }).join(", ");
-  const rows = await querySql<Record<string, number>>(
-    `SELECT ${cols} FROM {catalog}.gold.user_clout c WHERE NOT c.is_simulated`,
+  const rows = await q<Record<string, number | null>>(
+    `SELECT ${cols} FROM (
+       SELECT u.clout + ${openStakeSql("u.user_id")} AS c FROM users u
+       WHERE NOT u.is_simulated AND u.deleted_at IS NULL AND EXISTS (SELECT 1 FROM trades t WHERE t.user_id = u.user_id)) x`,
   ).catch(() => []);
   const r = rows[0];
   if (!r) return {};

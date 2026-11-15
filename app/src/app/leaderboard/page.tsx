@@ -2,7 +2,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { Avatar } from "@/components/avatar";
 import { Clout } from "@/components/clout";
+import { nameClass } from "@/components/cosmetics";
+import type { Look } from "@/core/cosmetics";
 import { UNIVERSITIES } from "@/core/universities";
+import { looksFor } from "@/server/cosmetics";
 import { isScope, leaderboard, schoolLeague, scopeValues } from "@/server/leaderboard";
 
 type Row = {
@@ -83,6 +86,8 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   const value =
     typeof sp.value === "string" && values.some((v) => v.scope_value === sp.value) ? sp.value : (values[0]?.scope_value ?? "all");
   const { top, shame }: { top: Row[]; shame: Row[] } = await leaderboard(scope, value);
+  // Equipped shop items live in Lakebase and depend on live Clout.
+  const looks = await looksFor([...top, ...shame].map((r) => r.user_id));
   const title = scope === "school" ? (schoolMeta.get(value)?.name ?? schoolName(value)) : scope === "overall" ? "All students, every university" : value;
 
   return (
@@ -102,8 +107,8 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
         </nav>
       )}
       <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
-        <Table title={title} rows={top} rankKey="rank" podium showSchool={scope !== "school"} />
-        <Table title="Hall of Shame" rows={shame} rankKey="rank_from_bottom" shame showSchool={scope !== "school"} />
+        <Table title={title} rows={top} rankKey="rank" podium showSchool={scope !== "school"} looks={looks} />
+        <Table title="Hall of Shame" rows={shame} rankKey="rank_from_bottom" shame showSchool={scope !== "school"} looks={looks} />
       </div>
       <p className="text-xs text-muted">Computed by the Lakeflow pipeline into the_curve.gold.leaderboard and gold.school_rankings.</p>
     </>
@@ -167,9 +172,11 @@ function Table({
   shame,
   podium,
   showSchool,
+  looks,
 }: {
   title: string;
   rows: Row[];
+  looks: Map<string, Look>;
   rankKey: "rank" | "rank_from_bottom";
   shame?: boolean;
   podium?: boolean;
@@ -203,9 +210,9 @@ function Table({
                 </td>
                 <td>
                   <Link href={`/u/${r.user_id}`} className="inline-flex items-center gap-2 font-medium hover:text-accent">
-                    {/* Leaderboard rows come from gold, which has no avatar data; initials avatar only. */}
-                    <Avatar userId={r.user_id} handle={r.handle} size={24} />
-                    @{r.handle}
+                    {/* Leaderboard rows come from gold, which has no avatar data; initials avatar + shop cosmetics. */}
+                    <Avatar userId={r.user_id} handle={r.handle} size={24} look={looks.get(r.user_id)} />
+                    <span className={nameClass(looks.get(r.user_id))}>@{r.handle}</span>
                   </Link>
                   {showSchool && <SchoolBadge id={r.school_id} />}
                 </td>
