@@ -406,3 +406,90 @@ CREATE TABLE IF NOT EXISTS weather_observations (
 
 -- Where a sports market's opening price came from (e.g. "Opened at 84% from ESPN's matchup predictor").
 ALTER TABLE markets ADD COLUMN IF NOT EXISTS opening_note text;
+
+-- ------------------------------------------------------------------ friends, groups, group markets, challenges
+-- Friendships: one row per pair (user_a < user_b). Pending until the other person accepts; deleted on decline/unfriend.
+CREATE TABLE IF NOT EXISTS friendships (
+  user_a       text NOT NULL REFERENCES users(user_id),
+  user_b       text NOT NULL REFERENCES users(user_id),
+  status       text NOT NULL CHECK (status IN ('pending', 'accepted')),
+  requested_by text NOT NULL REFERENCES users(user_id),
+  created_at   timestamptz NOT NULL DEFAULT now(),
+  responded_at timestamptz,
+  PRIMARY KEY (user_a, user_b),
+  CHECK (user_a < user_b)
+);
+CREATE INDEX IF NOT EXISTS friendships_b_idx ON friendships (user_b);
+
+-- Private groups: members make their own markets (real Clout, no public leaderboard credit).
+CREATE TABLE IF NOT EXISTS groups (
+  group_id    text PRIMARY KEY,
+  name        text NOT NULL,
+  description text,
+  owner_id    text NOT NULL REFERENCES users(user_id),
+  invite_code text UNIQUE NOT NULL,
+  created_at  timestamptz NOT NULL DEFAULT now(),
+  deleted_at  timestamptz
+);
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id  text NOT NULL REFERENCES groups(group_id),
+  user_id   text NOT NULL REFERENCES users(user_id),
+  role      text NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member')),
+  joined_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (group_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS group_members_user_idx ON group_members (user_id);
+
+-- NULL = public market. Group markets are visible to members only.
+ALTER TABLE markets ADD COLUMN IF NOT EXISTS group_id text REFERENCES groups(group_id);
+CREATE INDEX IF NOT EXISTS markets_group_idx ON markets (group_id, status);
+
+-- Who a group market is about (members of that group only). A tagged member can veto it (market voids).
+CREATE TABLE IF NOT EXISTS market_tags (
+  market_id text NOT NULL REFERENCES markets(market_id) ON DELETE CASCADE,
+  user_id   text NOT NULL REFERENCES users(user_id),
+  vetoed_at timestamptz,
+  PRIMARY KEY (market_id, user_id)
+);
+
+-- Disputed group markets: members who didn't trade vote (outcome index as text, or 'void').
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS closes_at timestamptz;
+ALTER TABLE disputes ADD COLUMN IF NOT EXISTS resolved_at timestamptz;
+CREATE TABLE IF NOT EXISTS dispute_votes (
+  market_id  text NOT NULL REFERENCES markets(market_id),
+  user_id    text NOT NULL REFERENCES users(user_id),
+  vote       text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  PRIMARY KEY (market_id, user_id)
+);
+
+-- Head-to-head challenges between friends. Stakes leave both balances on accept; the winner gets 2x stake.
+CREATE TABLE IF NOT EXISTS challenges (
+  challenge_id       text PRIMARY KEY,
+  market_id          text NOT NULL REFERENCES markets(market_id),
+  challenger_id      text NOT NULL REFERENCES users(user_id),
+  opponent_id        text NOT NULL REFERENCES users(user_id),
+  challenger_outcome int  NOT NULL,
+  opponent_outcome   int,               -- NULL = "anything else"
+  stake              int  NOT NULL CHECK (stake >= 1),
+  status             text NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'accepted', 'declined', 'cancelled', 'settled', 'void')),
+  winner_id          text REFERENCES users(user_id),
+  created_at         timestamptz NOT NULL DEFAULT now(),
+  accepted_at        timestamptz,
+  settled_at         timestamptz
+);
+CREATE INDEX IF NOT EXISTS challenges_market_idx ON challenges (market_id, status);
+CREATE INDEX IF NOT EXISTS challenges_users_idx ON challenges (challenger_id, opponent_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+  id         text PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES users(user_id),
+  kind       text NOT NULL,
+  ref_id     text,
+  actor_id   text REFERENCES users(user_id),
+  body       text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  read_at    timestamptz
+);
+CREATE INDEX IF NOT EXISTS notifications_user_idx ON notifications (user_id, read_at, created_at);

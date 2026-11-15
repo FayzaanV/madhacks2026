@@ -5,7 +5,8 @@ import { querySql } from "./warehouse";
 /**
  * Live leaderboards sorted straight from the Lakebase ledger (a plain SQL sort), instead of reading the gold
  * leaderboard through the SQL warehouse: always current, and no warehouse compute. Same row shapes the pages
- * used before. Clout = balance + cost basis still held (what the header shows; equals gold's 100 + realized).
+ * used before. Clout here is PUBLIC Clout: the header's balance + cost basis held, minus private group market and
+ * friend challenge results (they move real Clout but get no public credit).
  * Only Brier comes from gold (one cached query for the users shown), "–" when unavailable.
  */
 
@@ -38,15 +39,36 @@ const USER_COLUMN = { school: "school_id", major: "major", dorm: "dorm", club: "
 export type Scope = "overall" | keyof typeof USER_COLUMN | "course";
 export const isScope = (s: unknown): s is Scope => s === "overall" || s === "course" || (typeof s === "string" && s in USER_COLUMN);
 
-/** Every forecaster (1+ trade) with true Clout. $-free: callers add their own WHERE on b.* columns. */
+/**
+ * Every forecaster (1+ public trade) with PUBLIC Clout: true Clout (balance + cost basis held) minus what private
+ * group markets and friend challenges did to it, since those move real Clout but earn no public credit.
+ * $-free: callers add their own WHERE on b.* columns.
+ */
 const BASE = `
   WITH b AS (
     SELECT u.user_id, u.handle, u.school_id, u.major, u.dorm, u.club, u.is_simulated,
-           (u.clout + coalesce(o.open, 0))::float AS clout, a.n AS n_trades
+           (u.clout + coalesce(o.open, 0) - coalesce(g.pnl, 0) - coalesce(ch.net, 0))::float AS clout, a.n AS n_trades
     FROM users u
-    JOIN (SELECT user_id, count(*)::int AS n FROM trades GROUP BY user_id) a USING (user_id)
+    JOIN (SELECT t.user_id, count(*)::int AS n FROM trades t JOIN markets m USING (market_id)
+          WHERE m.group_id IS NULL GROUP BY t.user_id) a USING (user_id)
     LEFT JOIN (SELECT t.user_id, sum(t.basis_change) AS open FROM trades t JOIN markets m USING (market_id)
                WHERE m.status NOT IN ('resolved', 'final', 'voided') GROUP BY t.user_id) o USING (user_id)
+    LEFT JOIN (SELECT t.user_id, sum(CASE
+                 WHEN m.status IN ('resolved', 'final', 'disputed')
+                   THEN (CASE WHEN t.outcome_index = r.winning_outcome_index THEN t.shares ELSE 0 END) - t.clout_spent
+                 WHEN m.status = 'voided' THEN 0
+                 ELSE t.basis_change - t.clout_spent END) AS pnl
+               FROM trades t JOIN markets m USING (market_id) LEFT JOIN resolutions r USING (market_id)
+               WHERE m.group_id IS NOT NULL GROUP BY t.user_id) g USING (user_id)
+    LEFT JOIN (SELECT x.user_id, sum(x.net) AS net FROM (
+                 SELECT c.challenger_id AS user_id, c.status, c.winner_id, c.stake FROM challenges c
+                 UNION ALL SELECT c.opponent_id, c.status, c.winner_id, c.stake FROM challenges c) y
+               CROSS JOIN LATERAL (SELECT y.user_id, CASE
+                 WHEN y.status = 'accepted' THEN -y.stake
+                 WHEN y.status = 'settled' AND y.winner_id = y.user_id THEN y.stake
+                 WHEN y.status = 'settled' AND y.winner_id IS NOT NULL THEN -y.stake
+                 ELSE 0 END AS net) x
+               GROUP BY x.user_id) ch USING (user_id)
     WHERE u.deleted_at IS NULL)`;
 
 /** Clout realized per user in one course: winning shares held minus net Clout put in, resolved markets only. */
@@ -56,7 +78,7 @@ const COURSE = `
            sum(CASE WHEN t.outcome_index = r.winning_outcome_index THEN t.shares ELSE 0 END - t.clout_spent)::float AS clout,
            count(*)::int AS n_trades
     FROM trades t JOIN markets m USING (market_id) JOIN resolutions r USING (market_id) JOIN users u USING (user_id)
-    WHERE m.status IN ('resolved', 'final') AND m.course = $1 AND u.deleted_at IS NULL
+    WHERE m.status IN ('resolved', 'final') AND m.course = $1 AND m.group_id IS NULL AND u.deleted_at IS NULL
     GROUP BY t.user_id, u.handle, u.school_id, u.is_simulated)`;
 
 const RANKED = `
@@ -98,7 +120,7 @@ export async function scopeValues(scope: Scope): Promise<string[]> {
   if (scope === "course") {
     const rows = await q<{ v: string }>(
       `SELECT DISTINCT m.course AS v FROM markets m JOIN resolutions r USING (market_id)
-       WHERE m.status IN ('resolved', 'final') AND EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.market_id) ORDER BY 1`,
+       WHERE m.status IN ('resolved', 'final') AND m.group_id IS NULL AND EXISTS (SELECT 1 FROM trades t WHERE t.market_id = m.market_id) ORDER BY 1`,
     );
     return rows.map((r) => r.v);
   }

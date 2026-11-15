@@ -1,6 +1,8 @@
 import "server-only";
 import type { PoolClient } from "pg";
 import { applySell, applyTrade, DEFAULT_B, prices, sellProceeds, sharesForProceeds } from "@/core/lmsr";
+import { challengeCredits, challengeDeltas, parseMentions, type Challenge } from "@/core/social";
+import { notify } from "./notify";
 import { canAfford, overrideDeltas, privileges, sellBasis, settlementCredits, type Winner } from "@/core/clout";
 import { latestClose, validateRule, type AutoRule } from "@/core/auto-rules";
 import { activeLook, type Look } from "@/core/cosmetics";
@@ -35,6 +37,10 @@ export type Market = {
   opening_note: string | null;
   /** Live/final score for sports and intramural markets. */
   game: GameBadge | null;
+  /** Private group market (members only); null = public. */
+  group_id: string | null;
+  group_name: string | null;
+  creator_id: string | null;
 };
 
 export type GameBadge = {
@@ -57,7 +63,8 @@ function withPrices<T extends { liquidity_b: number; outcomes: Omit<Outcome, "pr
 const MARKET_SQL = `
   SELECT m.market_id, m.course, m.question, m.market_type, m.status, m.liquidity_b, m.resolution_source,
          m.closes_at, m.is_simulated, m.closes_at < now() AS past_close,
-         m.category, m.sport, m.event_ref, m.market_kind, m.opening_note,
+         m.category, m.sport, m.event_ref, m.market_kind, m.opening_note, m.group_id, m.creator_id,
+         (SELECT g.name FROM groups g WHERE g.group_id = m.group_id) AS group_name,
          CASE WHEN m.category = 'sports' THEN (
            SELECT json_build_object('kind', 'sports', 'state', sg.state, 'detail', sg.detail, 'home', sg.home_abbr,
                     'away', sg.away_abbr, 'home_score', sg.home_score, 'away_score', sg.away_score, 'starts_at', sg.starts_at,
@@ -83,12 +90,13 @@ const MARKET_SQL = `
  * closes_at but not resolved yet; anything else is a raw status (resolved, final, voided...).
  */
 export async function listMarkets(status = "live"): Promise<Market[]> {
+  // Public lists never include private group markets (see listGroupMarkets / getVisibleMarket).
   const where =
-    status === "live"
+    (status === "live"
       ? "m.status = 'live' AND m.closes_at > now()"
       : status === "awaiting"
         ? "m.status = 'live' AND m.closes_at <= now()"
-        : "m.status = $1";
+        : "m.status = $1") + " AND m.group_id IS NULL";
   const rows = await q<Market>(
     `${MARKET_SQL} WHERE ${where} ORDER BY volume DESC`,
     status === "live" || status === "awaiting" ? [] : [status],
@@ -96,9 +104,33 @@ export async function listMarkets(status = "live"): Promise<Market[]> {
   return rows.map(withPrices);
 }
 
+/** Any market by id, with no visibility check. Pages and APIs should use getVisibleMarket. */
 export async function getMarket(id: string): Promise<Market | null> {
   const rows = await q<Market>(`${MARKET_SQL} WHERE m.market_id = $1`, [id]);
   return rows[0] ? withPrices(rows[0]) : null;
+}
+
+export async function isGroupMember(groupId: string, userId: string | null | undefined): Promise<boolean> {
+  if (!userId) return false;
+  const r = await q("SELECT 1 FROM group_members m JOIN groups g USING (group_id) WHERE m.group_id = $1 AND m.user_id = $2 AND g.deleted_at IS NULL", [
+    groupId,
+    userId,
+  ]);
+  return r.length > 0;
+}
+
+/** A market the user may see: public markets for everyone, group markets for that group's members only. */
+export async function getVisibleMarket(id: string, userId: string | null | undefined): Promise<Market | null> {
+  const m = await getMarket(id);
+  if (!m) return null;
+  if (m.group_id && !(await isGroupMember(m.group_id, userId))) return null;
+  return m;
+}
+
+/** A group's markets (members only; callers check membership). */
+export async function listGroupMarkets(groupId: string): Promise<Market[]> {
+  const rows = await q<Market>(`${MARKET_SQL} WHERE m.group_id = $1 ORDER BY m.created_at DESC`, [groupId]);
+  return rows.map(withPrices);
 }
 
 export type Comment = {
@@ -191,11 +223,16 @@ function trade<T>(userId: string, marketId: string, outcomeIndex: number, fn: (t
     // FOR SHARE: trades run in parallel, but wait for (and then see) a resolution holding the row FOR UPDATE,
     // so no trade can land after resolveMarket has read the market's trades. Lock order: market, user, outcomes.
     const m = (
-      await c.query("SELECT status, liquidity_b, course, closes_at < now() AS past_close FROM markets WHERE market_id = $1 FOR SHARE", [
-        marketId,
-      ])
+      await c.query(
+        "SELECT status, liquidity_b, course, group_id, closes_at < now() AS past_close FROM markets WHERE market_id = $1 FOR SHARE",
+        [marketId],
+      )
     ).rows[0];
     if (!m) throw new TradeError("Market not found.", 404);
+    if (m.group_id) {
+      const member = await c.query("SELECT 1 FROM group_members WHERE group_id = $1 AND user_id = $2", [m.group_id, userId]);
+      if (!member.rowCount) throw new TradeError("Market not found.", 404); // private group market
+    }
     if (m.status !== "live") throw new TradeError("This market is not open for trading.");
     if (m.past_close) throw new TradeError("Trading has closed; this market is awaiting resolution.");
     const u = (await c.query("SELECT clout FROM users WHERE user_id = $1 FOR UPDATE", [userId])).rows[0];
@@ -307,6 +344,52 @@ export async function placeSell(userId: string, marketId: string, outcomeIndex: 
 }
 
 /**
+ * Pay out head-to-head challenges on a market inside its settlement transaction. First settlement: accepted
+ * challenges pay 2x stake to the right side (refund on void or when neither side's outcome won); pending ones are
+ * cancelled (no stakes were taken). Override: settled challenges move by the difference (challengeDeltas).
+ */
+async function settleChallenges(c: PoolClient, marketId: string, previous: Winner | null, winner: Winner) {
+  const rows = (
+    await c.query(
+      `SELECT challenge_id, challenger_id, opponent_id, challenger_outcome, opponent_outcome, stake, status FROM challenges
+       WHERE market_id = $1 AND status IN ('pending', 'accepted', 'settled', 'void') FOR UPDATE`,
+      [marketId],
+    )
+  ).rows as (Challenge & { challenge_id: string; status: string })[];
+  const moves = new Map<string, number>();
+  const add = (u: string, x: number) => moves.set(u, (moves.get(u) ?? 0) + x);
+  for (const ch of rows) {
+    if (ch.status === "pending") {
+      await c.query("UPDATE challenges SET status = 'cancelled' WHERE challenge_id = $1", [ch.challenge_id]);
+      continue;
+    }
+    if (ch.status === "accepted" || previous === null) {
+      if (ch.status !== "accepted") continue;
+      const { credits } = challengeCredits(ch, winner);
+      for (const [u, x] of Object.entries(credits)) add(u, x);
+    } else {
+      for (const [u, x] of Object.entries(challengeDeltas(ch, previous, winner))) add(u, x);
+    }
+    const { winnerId } = challengeCredits(ch, winner);
+    await c.query("UPDATE challenges SET status = $2, winner_id = $3, settled_at = now() WHERE challenge_id = $1", [
+      ch.challenge_id,
+      winner === "void" ? "void" : "settled",
+      winnerId,
+    ]);
+    for (const u of [ch.challenger_id, ch.opponent_id]) {
+      const msg = !winnerId ? "Stakes refunded." : winnerId === u ? `You won ${2 * ch.stake} Clout!` : `You lost your ${ch.stake} Clout stake.`;
+      await notify([u], "challenge_result", marketId, null, `Challenge settled: ${msg}`, c);
+    }
+  }
+  if (moves.size)
+    await c.query(
+      `UPDATE users u SET clout = u.clout + x.credit FROM unnest($1::text[], $2::float8[]) AS x(user_id, credit)
+       WHERE u.user_id = x.user_id`,
+      [[...moves.keys()], [...moves.values()]],
+    );
+}
+
+/**
  * Resolve a market (or void it). One Postgres transaction that:
  *   - requires the resolve privilege (500+ true Clout = balance + open stake), or an admin
  *   - locks the market (trades take it FOR SHARE, so none land mid-resolution), records the resolution with a
@@ -324,8 +407,22 @@ export async function resolveMarket(
   rationale: string,
   { override = false }: { override?: boolean } = {},
 ) {
-  if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
-  if (override && !isAdmin(user)) throw new TradeError("Only admins can override a resolution.", 403);
+  const [g] = await q<{ group_id: string | null; creator_id: string | null; role: string | null }>(
+    `SELECT m.group_id, m.creator_id, gm.role FROM markets m
+     LEFT JOIN group_members gm ON gm.group_id = m.group_id AND gm.user_id = $2 WHERE m.market_id = $1`,
+    [marketId, user.user_id],
+  );
+  if (!g) throw new TradeError("Market not found.", 404);
+  if (g.group_id) {
+    // Group markets: the creator resolves; the group's owner/admins can resolve or override. Clout doesn't matter.
+    const groupAdmin = g.role === "owner" || g.role === "admin";
+    if (!g.role) throw new TradeError("Market not found.", 404);
+    if (override ? !groupAdmin : !(groupAdmin || g.creator_id === user.user_id))
+      throw new TradeError(override ? "Only the group's owner or admins can override." : "Only the market's creator or group admins can resolve it.", 403);
+  } else {
+    if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
+    if (override && !isAdmin(user)) throw new TradeError("Only admins can override a resolution.", 403);
+  }
   // A person resolving asks for a gold refresh (rate-limited in triggerRefresh); bots never do.
   return settleMarket(marketId, winner, rationale, user.user_id, { override, by: user.handle, refresh: true });
 }
@@ -348,7 +445,7 @@ export async function settleMarket(
   const out = await tx(async (c) => {
     const m = (await c.query("SELECT status FROM markets WHERE market_id = $1 FOR UPDATE", [marketId])).rows[0];
     if (!m) throw new TradeError("Market not found.", 404);
-    const settled = ["resolved", "final", "voided"].includes(m.status);
+    const settled = ["resolved", "final", "voided", "disputed"].includes(m.status);
     if (settled && !override) throw new TradeError(`This market is already ${m.status}.`, 409);
     if (!settled && !["live", "closed"].includes(m.status)) throw new TradeError(`This market is ${m.status}.`, 409);
     const n = (await c.query("SELECT count(*)::int AS n FROM outcomes WHERE market_id = $1", [marketId])).rows[0].n as number;
@@ -369,6 +466,7 @@ export async function settleMarket(
        FROM unnest($1::text[], $2::float8[]) AS x(user_id, credit) WHERE u.user_id = x.user_id`,
       [[...moves.keys()], [...moves.values()]],
     );
+    await settleChallenges(c, marketId, previous, winner);
     const status = winner === "void" ? "voided" : "resolved";
     const label = (w: Winner) => (w === "void" ? "void" : `outcome ${w + 1}`);
     const why =
@@ -416,6 +514,8 @@ export type NewMarket = {
   liquidity_b?: number;
   not_about_a_student: boolean;
   auto_rule?: unknown; // weather / rec-center rule (core/auto-rules.ts): Yes/No, settled automatically from data
+  group_id?: string; // private group market: any member may create it
+  tagged?: string[]; // user ids the market is about (group markets only; must be members)
 };
 
 export const WEATHER_SOURCE = "Open-Meteo (open-meteo.com), Madison daily values";
@@ -426,11 +526,38 @@ export const FACILITY_SOURCE = "UW Rec Well live facility counts (recwell.wisc.e
  * market and its outcomes at q = 0, so every outcome starts at an equal price.
  */
 export async function createMarket(user: { user_id: string; email: string; school_id: string }, input: Partial<NewMarket>) {
-  if (!isAdmin(user)) throw new TradeError("Only admins can create markets right now.", 403);
+  const groupId = input.group_id ? String(input.group_id) : null;
   const question = String(input.question ?? "").trim();
-  const course = String(input.course ?? "").trim().slice(0, 40) || "campus";
   if (question.length < 10 || question.length > 200) throw new TradeError("Questions are 10–200 characters.");
-  if (!input.not_about_a_student) throw new TradeError("Markets can't be about individual students. Confirm the box.");
+  // Public markets: admins only, never about a person. Group markets: any member; may be about members (tagged),
+  // and every @mention in the question must be a member too.
+  let tagged: string[] = [];
+  let groupName = "";
+  if (groupId) {
+    const [g] = await q<{ name: string }>(
+      `SELECT g.name FROM groups g JOIN group_members gm ON gm.group_id = g.group_id
+       WHERE g.group_id = $1 AND gm.user_id = $2 AND g.deleted_at IS NULL`,
+      [groupId, user.user_id],
+    );
+    if (!g) throw new TradeError("You're not in that group.", 403);
+    groupName = g.name;
+    const ids = [...new Set((input.tagged ?? []).map(String))];
+    const handles = parseMentions(question);
+    const members = await q<{ user_id: string; handle: string }>(
+      `SELECT u.user_id, lower(u.handle) AS handle FROM group_members gm JOIN users u USING (user_id) WHERE gm.group_id = $1`,
+      [groupId],
+    );
+    const bad = handles.filter((h) => !members.some((m) => m.handle === h));
+    if (bad.length) throw new TradeError(`You can only tag people in this group (not @${bad.join(", @")}).`);
+    if (ids.some((id) => !members.some((m) => m.user_id === id))) throw new TradeError("You can only tag people in this group.");
+    tagged = [...new Set([...ids, ...members.filter((m) => handles.includes(m.handle)).map((m) => m.user_id)])];
+  } else {
+    if (!isAdmin(user)) throw new TradeError("Only admins can create public markets right now.", 403);
+    if (!input.not_about_a_student) throw new TradeError("Markets can't be about individual students. Confirm the box.");
+    if (parseMentions(question).length || input.tagged?.length)
+      throw new TradeError("Public markets can't tag people. Make it in a group instead.");
+  }
+  const course = groupId ? groupName.slice(0, 40) : String(input.course ?? "").trim().slice(0, 40) || "campus";
   let rule: AutoRule | null = null;
   if (input.auto_rule) {
     const v = validateRule(input.auto_rule);
@@ -457,31 +584,51 @@ export async function createMarket(user: { user_id: string; email: string; schoo
   await tx(async (c) => {
     await c.query(
       `INSERT INTO markets (market_id, school_id, course, question, market_type, status, liquidity_b, creator_id,
-                            resolution_source, opens_at, closes_at, category, market_kind, auto_resolve, auto_rule)
-       VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9,$10,$11,$12,$13)`,
+                            resolution_source, opens_at, closes_at, category, market_kind, auto_resolve, auto_rule, group_id)
+       VALUES ($1,$2,$3,$4,$5,'live',$6,$7,$8,now(),$9,$10,$11,$12,$13,$14)`,
       [marketId, user.school_id, rule ? "campus" : course, question, type, b, user.user_id, source, new Date(closes),
-       rule ? "campus" : "academic", rule ? rule.kind : null, Boolean(rule), rule ? JSON.stringify(rule) : null],
+       rule ? "campus" : groupId ? "group" : "academic", rule ? rule.kind : null, Boolean(rule), rule ? JSON.stringify(rule) : null,
+       groupId],
     );
+    if (tagged.length)
+      await c.query("INSERT INTO market_tags (market_id, user_id) SELECT $1, u FROM unnest($2::text[]) AS u", [marketId, tagged]);
     await c.query(
       `INSERT INTO outcomes (market_id, outcome_index, label, q_shares)
        SELECT $1, i - 1, label, 0 FROM unnest($2::text[]) WITH ORDINALITY AS x(label, i)`,
       [marketId, labels],
     );
   });
+  if (tagged.length)
+    await notify(tagged, "tagged", marketId, user.user_id, `A market in ${groupName} is about you: "${question}". You can veto it.`);
   return { marketId };
 }
 
 export async function addComment(userId: string, marketId: string, body: string) {
   const text = body.trim().slice(0, 500);
   if (!text) throw new TradeError("Comment is empty.");
-  const exists = await q("SELECT 1 FROM markets WHERE market_id = $1", [marketId]);
-  if (!exists.length) throw new TradeError("Market not found.", 404);
+  const [m] = await q<{ group_id: string | null }>("SELECT group_id FROM markets WHERE market_id = $1", [marketId]);
+  if (!m || (m.group_id && !(await isGroupMember(m.group_id, userId)))) throw new TradeError("Market not found.", 404);
+  // Tagging people: only inside a private group, and only that group's members (public markets stay person-free).
+  const handles = parseMentions(text);
+  let mentioned: string[] = [];
+  if (handles.length) {
+    if (!m.group_id) throw new TradeError("You can only tag people in group markets.");
+    const found = await q<{ user_id: string; handle: string }>(
+      `SELECT u.user_id, lower(u.handle) AS handle FROM users u JOIN group_members gm ON gm.user_id = u.user_id
+       WHERE gm.group_id = $1 AND lower(u.handle) = ANY($2)`,
+      [m.group_id, handles],
+    );
+    const missing = handles.filter((h) => !found.some((f) => f.handle === h));
+    if (missing.length) throw new TradeError(`You can only tag people in this group (not @${missing.join(", @")}).`);
+    mentioned = found.map((f) => f.user_id);
+  }
   const commentId = `c-${crypto.randomUUID()}`;
   const [row] = await q<{ created_at: string }>(
     `INSERT INTO comments (comment_id, market_id, user_id, body) VALUES ($1,$2,$3,$4)
      RETURNING to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at`,
     [commentId, marketId, userId, text],
   );
+  await notify(mentioned, "mentioned", marketId, userId, text.slice(0, 140));
   return { commentId, created_at: row.created_at };
 }
 

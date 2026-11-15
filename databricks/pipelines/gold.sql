@@ -49,7 +49,7 @@ AS SELECT user_id, market_id, course,
           SUM(CASE WHEN side = 'buy' THEN clout_spent * POW(forecast - won, 2) END)
             / NULLIF(SUM(CASE WHEN side = 'buy' THEN clout_spent END), 0) AS brier,
           SUM(won * shares - clout_spent) AS clout
-FROM the_curve.silver.trades_enriched WHERE is_resolved
+FROM the_curve.silver.trades_enriched WHERE is_resolved AND group_id IS NULL
 GROUP BY user_id, market_id, course;
 
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_brier
@@ -62,7 +62,7 @@ CREATE OR REFRESH MATERIALIZED VIEW the_curve.gold.user_calibration
 COMMENT '10% forecast buckets: mean forecast vs hit rate, per user and overall (user_id = __all__)'
 AS WITH f AS (
   SELECT user_id, LEAST(9, GREATEST(0, FLOOR(forecast * 10))) AS bucket, forecast, won
-  FROM the_curve.silver.trades_enriched WHERE is_resolved AND side = 'buy'
+  FROM the_curve.silver.trades_enriched WHERE is_resolved AND side = 'buy' AND group_id IS NULL
 )
 SELECT user_id, CAST(bucket AS INT) AS bucket, COUNT(*) AS n, AVG(forecast) AS mean_forecast, AVG(won) AS hit_rate
 FROM f GROUP BY user_id, bucket

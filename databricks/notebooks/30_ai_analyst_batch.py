@@ -42,7 +42,7 @@ WITH live AS (
   FROM {catalog}.silver.markets m
   LEFT JOIN (SELECT market_id, COUNT(*) AS n FROM {catalog}.silver.trades_enriched
              WHERE created_at > current_timestamp() - INTERVAL 24 HOURS GROUP BY market_id) a USING (market_id)
-  WHERE m.status = 'live' AND m.closes_at > current_timestamp() {fresh_filter}
+  WHERE m.status = 'live' AND m.closes_at > current_timestamp() AND m.group_id IS NULL {fresh_filter}  -- never private group markets
   ORDER BY COALESCE(a.n, 0) DESC
   LIMIT {MAX_MARKETS}
 ), prices AS (

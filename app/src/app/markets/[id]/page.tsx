@@ -12,7 +12,7 @@ import { OutcomeRows, PickProvider } from "@/components/trade-context";
 import { LiveScore } from "@/components/live-score";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { getInsight } from "@/server/analyst";
-import { canResolve, getComments, getMarket, isAdmin } from "@/server/markets";
+import { canResolve, getComments, getVisibleMarket, isAdmin } from "@/server/markets";
 import { AutoRulePanel } from "@/components/auto-rule-panel";
 import { marketActivity, oddsSeries, positions, topHolders, type Position } from "@/server/portfolio";
 import { ResolveBox } from "@/components/resolve-box";
@@ -45,7 +45,8 @@ async function Market({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const [{ id }, sp] = await Promise.all([params, searchParams]);
-  const [market, user] = await Promise.all([getMarket(id), currentUser()]);
+  const user = await currentUser();
+  const market = await getVisibleMarket(id, user?.user_id); // group markets: members only (404 otherwise)
   if (!market) notFound();
   const mine = user ? await positions(user.user_id, id) : [];
   const binary = market.market_type === "binary" && market.outcomes.length === 2;

@@ -57,6 +57,8 @@ export async function tick(): Promise<Record<string, unknown> | null> {
         out.imAutoConfirmed = await im.autoConfirmDue();
         // Simulated test markets: settle closed ones and keep open ones moving (also pinged by /api/sim/tick).
         out.test = await (await import("./testmarkets")).simTick();
+        // Group market disputes whose 24h vote window ended: decide by plurality (or keep the creator's result).
+        out.disputesClosed = await (await import("./social")).closeExpiredDisputes();
       }
       if (!(await espnReachable())) {
         out.sports = "skipped: ESPN not reachable from this instance";

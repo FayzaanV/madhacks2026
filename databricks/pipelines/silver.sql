@@ -30,7 +30,7 @@ FROM e;
 CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.markets
 COMMENT 'Markets with resolution and outcome count'
 AS SELECT m.market_id, m.school_id, m.course, m.question, m.market_type, m.status, m.liquidity_b,
-          m.creator_id, m.resolution_source, m.created_at, m.opens_at, m.closes_at, m.is_simulated,
+          m.creator_id, m.resolution_source, m.created_at, m.opens_at, m.closes_at, m.is_simulated, m.group_id,
           COALESCE(m.category, 'academic') AS category, m.sport, m.event_ref, m.market_kind, m.line,
           r.winning_outcome_index, r.resolved_at, r.resolved_by,
           r.winning_outcome_index IS NOT NULL AND m.status IN ('resolved', 'final') AS is_resolved,
@@ -44,7 +44,7 @@ CREATE OR REFRESH MATERIALIZED VIEW the_curve.silver.trades_enriched
 COMMENT 'Trade + market + user. Signed: sells have negative shares/clout_spent/basis_change. forecast = post-trade price (buys only count as forecasts).'
 AS SELECT t.trade_id, t.market_id, t.user_id, t.outcome_index, t.side, t.clout_spent, t.shares, t.basis_change,
           t.price_before, t.post_price AS forecast, t.prices_after, t.created_at, t.is_simulated,
-          m.course, m.question, m.market_type, m.status AS market_status, m.is_resolved,
+          m.course, m.question, m.market_type, m.status AS market_status, m.is_resolved, m.group_id,
           m.winning_outcome_index, m.resolved_at,
           CASE WHEN m.is_resolved THEN CAST(t.outcome_index = m.winning_outcome_index AS INT) END AS won,
           u.handle, u.major, u.dorm, u.club, u.archetype

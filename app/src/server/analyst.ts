@@ -1,6 +1,6 @@
 import "server-only";
 import { config, databricksHost, databricksToken, localMode } from "./databricks";
-import { getComments, getMarket, smartMoney, TradeError } from "./markets";
+import { getComments, getVisibleMarket, smartMoney, TradeError } from "./markets";
 import { q } from "./ledger";
 import { querySql } from "./warehouse";
 
@@ -43,9 +43,9 @@ export async function getInsight(marketId: string): Promise<Insight | null> {
   }
 }
 
-async function buildContext(marketId: string) {
+async function buildContext(marketId: string, userId: string) {
   const [market, comments, sm, insight, recent] = await Promise.all([
-    getMarket(marketId),
+    getVisibleMarket(marketId, userId), // group markets: members only
     getComments(marketId).then((p) => p.comments),
     smartMoney(marketId).catch(() => []),
     getInsight(marketId),
@@ -108,7 +108,7 @@ export async function askAnalyst(marketId: string, userId: string, question: str
   )[0].n;
   if (used >= MAX_QUESTIONS_PER_HOUR)
     throw new TradeError(`You've asked ${MAX_QUESTIONS_PER_HOUR} questions this hour. Try again later.`, 429);
-  const ctx = await buildContext(marketId);
+  const ctx = await buildContext(marketId, userId);
   if (!ctx) throw new Error("Market not found");
   const started = Date.now();
   const res = await fetch(`${databricksHost}/serving-endpoints/${config.aiModel}/invocations`, {
