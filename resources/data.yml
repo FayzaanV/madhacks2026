@@ -59,12 +59,15 @@ resources:
         - level: CAN_MANAGE_RUN
           service_principal_name: ${resources.apps.yomi.service_principal_client_id}
       description: Lakebase ledger -> bronze, refresh silver/gold (leaderboards), AI analyst insights; then the Union steps, which can fail without affecting anything before them.
-      # The app also starts this job right after each resolution; queue those runs instead of skipping them.
+      # Compute budget (Free Edition): one run at a time, extra triggers are DROPPED (not queued), every 30 min.
+      # PAUSED after the quota ran out on 2026-11-14; set UNPAUSED here (and deploy) once compute is back.
       queue:
-        enabled: true
+        enabled: false
+      max_concurrent_runs: 1
       schedule:
-        quartz_cron_expression: "0 0/15 * * * ?"
+        quartz_cron_expression: "0 0/30 * * * ?"
         timezone_id: America/Chicago
+        pause_status: PAUSED
       tasks:
         - task_key: sync_bronze
           notebook_task:
@@ -92,11 +95,21 @@ resources:
           run_if: ALL_DONE
           notebook_task:
             notebook_path: ../databricks/notebooks/20_campus_weather.py
-        # Union steps: after the core refresh, each runs whatever happened before it (run_if ALL_DONE).
+
+    # Union venue feed + settlement + pipeline: its own job so it never adds to the core refresh. Hourly, PAUSED
+    # until the team decides to spend compute on it.
+    union_live:
+      name: yomi-union-live
+      description: Union venue feed (sensor or simulated), settle due Union markets, refresh the Union pipeline.
+      queue:
+        enabled: false
+      max_concurrent_runs: 1
+      schedule:
+        quartz_cron_expression: "0 5 * * * ?"
+        timezone_id: America/Chicago
+        pause_status: PAUSED
+      tasks:
         - task_key: union_feed
-          depends_on:
-            - task_key: medallion
-          run_if: ALL_DONE
           notebook_task:
             notebook_path: ../databricks/notebooks/40_union_feed.py
         - task_key: union_settle
@@ -118,6 +131,7 @@ resources:
       schedule:
         quartz_cron_expression: "0 0 6 * * ?"
         timezone_id: America/Chicago
+        pause_status: PAUSED
       tasks:
         - task_key: open_markets
           notebook_task:

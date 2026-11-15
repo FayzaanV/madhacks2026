@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 /** Admin tools for simulated [Test] markets: create a batch closing tonight, or settle every closed one now. */
-export function TestMarketTools({ agentTrades }: { agentTrades: number }) {
+export function TestMarketTools() {
   const router = useRouter();
   const [count, setCount] = useState(8);
   const [busy, setBusy] = useState(false);
@@ -30,10 +30,6 @@ export function TestMarketTools({ agentTrades }: { agentTrades: number }) {
       <p className="text-muted">
         Simulated <b>[Test]</b> markets that close tonight (Madison time), get bets from simulated users, and resolve at random
         (weighted by the odds at close). Resolve one early or override the result from its page.
-      </p>
-      <p className="text-xs text-muted">
-        Simulated agents trade every simulated market around the clock (whales, sells, herding, extreme prices):{" "}
-        <b>{agentTrades.toLocaleString()} agent trades in the last hour</b>. Real markets are never touched.
       </p>
       <div className="flex flex-wrap items-center gap-2">
         <input

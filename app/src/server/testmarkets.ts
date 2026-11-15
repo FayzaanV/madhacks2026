@@ -1,7 +1,6 @@
 import "server-only";
 import { prices } from "@/core/lmsr";
 import { closeTimes, pickTemplates, weightedPick } from "@/core/testmarkets";
-import { triggerRefresh } from "./jobs";
 import { q, tx } from "./ledger";
 import { isAdmin, placeBuy, settleMarket, TradeError } from "./markets";
 
@@ -76,8 +75,8 @@ export async function createTestMarkets(admin: { user_id: string; email: string;
 }
 
 /**
- * Resolve every closed, still-live test market at random, weighted by its current odds. One leaderboard refresh
- * for the whole batch. Safe to call concurrently: resolveMarket locks the market and refuses settled ones.
+ * Resolve every closed, still-live test market at random, weighted by its current odds. No refresh is triggered;
+ * the scheduled refresh picks the results up. Safe to call concurrently: resolveMarket locks the market and refuses settled ones.
  */
 export async function settleDueTestMarkets() {
   const due = await q<{ market_id: string; liquidity_b: number; q: number[]; creator_id: string }>(
@@ -99,21 +98,18 @@ export async function settleDueTestMarkets() {
       if (!(e instanceof TradeError)) throw e; // someone resolved it first
     }
   }
-  if (settled.length) await triggerRefresh();
   return { settled: settled.length };
 }
 
 let lastTick = 0;
 
 /**
- * Background activity, at most once a minute per server: settle due test markets, then let the simulated trading
- * agents (server/agents.ts) trade simulated markets so their odds keep moving. Runs from the background poller and
- * from POST /api/sim/tick (page views) as a backup; cheap when there's nothing to do.
+ * Background activity, at most once a minute per server: settle due test markets. Runs from the background poller
+ * and from POST /api/sim/tick (page views) as a backup; cheap when there's nothing to do.
  */
 export async function simTick() {
   if (Date.now() - lastTick < 60e3) return { skipped: true };
   lastTick = Date.now();
   const { settled } = await settleDueTestMarkets();
-  const agents = await (await import("./agents")).agentTick();
-  return { settled, agents };
+  return { settled };
 }

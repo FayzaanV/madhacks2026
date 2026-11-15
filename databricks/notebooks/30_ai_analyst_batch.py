@@ -1,7 +1,7 @@
 # Databricks notebook source
 # MAGIC %md
 # MAGIC # 30 · AI market analyst (batch) → `gold.market_ai_insights`
-# MAGIC For every live market, builds a context (question, crowd vs Smart Money, recent trades, top comments)
+# MAGIC For the 20 busiest live markets without a fresh (<2h) insight, builds a context (question, crowd vs Smart Money, recent trades, top comments)
 # MAGIC and asks a Foundation Model through **`ai_query`** for a structured insight. Each market's
 # MAGIC prompt and answer are also logged as an **MLflow trace** so the team can inspect AI behavior.
 # MAGIC The analyst explains; it never tells anyone what to bet and never trades.
@@ -26,11 +26,25 @@ counts only users with positive Clout. Be concise and concrete, like a sharp spo
 
 # COMMAND ----------
 
+# Compute budget: only the busiest live markets, and skip any with an insight from the last 2 hours. One ai_query
+# per market per run used to cover every live market (~230 with sports) and helped exhaust the Free Edition quota.
+MAX_MARKETS = 20
+insights_table = f"{catalog}.gold.market_ai_insights"
+fresh_filter = (
+    f"AND m.market_id NOT IN (SELECT market_id FROM {insights_table} WHERE generated_at > current_timestamp() - INTERVAL 2 HOURS)"
+    if spark.catalog.tableExists(insights_table) else ""
+)
+
 spark.sql(f"""
 CREATE OR REPLACE TEMP VIEW analyst_context AS
 WITH live AS (
-  SELECT market_id, course, question, market_type, closes_at, resolution_source
-  FROM {catalog}.silver.markets WHERE status = 'live'
+  SELECT m.market_id, m.course, m.question, m.market_type, m.closes_at, m.resolution_source
+  FROM {catalog}.silver.markets m
+  LEFT JOIN (SELECT market_id, COUNT(*) AS n FROM {catalog}.silver.trades_enriched
+             WHERE created_at > current_timestamp() - INTERVAL 24 HOURS GROUP BY market_id) a USING (market_id)
+  WHERE m.status = 'live' AND m.closes_at > current_timestamp() {fresh_filter}
+  ORDER BY COALESCE(a.n, 0) DESC
+  LIMIT {MAX_MARKETS}
 ), prices AS (
   SELECT market_id,
          TO_JSON(COLLECT_LIST(NAMED_STRUCT('outcome', label, 'crowd', ROUND(crowd_price, 3),
@@ -109,8 +123,14 @@ out = (insights
        .select("market_id", "course", "question", "insight.*", F.round("gap", 3).alias("crowd_smart_gap"),
                F.lit(model).alias("model"), F.current_timestamp().alias("generated_at"),
                F.lit(True).alias("based_on_simulated_data")))
-out.write.mode("overwrite").option("overwriteSchema", "true").saveAsTable(f"{catalog}.gold.market_ai_insights")
-display(spark.table(f"{catalog}.gold.market_ai_insights"))
+# Merge, don't overwrite: markets skipped this run keep their last insight.
+if spark.catalog.tableExists(insights_table):
+    out.createOrReplaceTempView("new_insights")
+    spark.sql(f"""MERGE INTO {insights_table} t USING new_insights s ON t.market_id = s.market_id
+                  WHEN MATCHED THEN UPDATE SET * WHEN NOT MATCHED THEN INSERT *""")
+else:
+    out.write.saveAsTable(insights_table)
+print(f"insights generated this run: {insights.count()} (max {MAX_MARKETS})")
 
 # COMMAND ----------
 

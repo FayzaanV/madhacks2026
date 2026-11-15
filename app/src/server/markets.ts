@@ -324,21 +324,23 @@ export async function resolveMarket(
 ) {
   if (!canResolve(user)) throw new TradeError("Resolving markets takes 500+ Clout.", 403);
   if (override && !isAdmin(user)) throw new TradeError("Only admins can override a resolution.", 403);
-  return settleMarket(marketId, winner, rationale, user.user_id, { override, by: user.handle });
+  // A person resolving asks for a gold refresh (rate-limited in triggerRefresh); bots never do.
+  return settleMarket(marketId, winner, rationale, user.user_id, { override, by: user.handle, refresh: true });
 }
 
 /**
  * Settle a market with no permission check: the payout transaction shared by manual resolution and the
  * auto-resolvers (sports poller as u-yomi-sports, intramurals as u-yomi-im, test markets as their creator).
  * Callers decide who may settle. `override` re-resolves a settled market (balances move by the difference);
- * `refresh: false` skips the gold refresh so a batch can trigger one at the end.
+ * `refresh` (off by default) asks for a gold refresh; auto-resolvers leave it off and the schedule catches up,
+ * because a refresh per settled market exhausted the Free Edition compute quota.
  */
 export async function settleMarket(
   marketId: string,
   winner: Winner,
   rationale: string,
   resolvedBy: string,
-  { override = false, refresh = true, by }: { override?: boolean; refresh?: boolean; by?: string } = {},
+  { override = false, refresh = false, by }: { override?: boolean; refresh?: boolean; by?: string } = {},
 ) {
   const note = rationale.trim().slice(0, 1000);
   const out = await tx(async (c) => {
