@@ -1,6 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { fromMadison } from "@/core/time";
 import { useState } from "react";
 
 const field = "w-full rounded-lg border border-line bg-bg px-3 py-2 text-sm";
@@ -26,7 +27,7 @@ export function MarketForm() {
         course: f.get("course"),
         market_type: type,
         outcomes: type === "multiple_choice" ? outcomes : undefined,
-        closes_at: new Date(String(f.get("closes_at"))).toISOString(),
+        closes_at: fromMadison(String(f.get("closes_at"))).toISOString(), // Madison time, whatever the browser's zone
         resolution_source: f.get("resolution_source"),
         liquidity_b: Number(f.get("liquidity_b")),
         not_about_a_student: f.get("not_about_a_student") === "on",
@@ -50,7 +51,7 @@ export function MarketForm() {
           <input name="course" maxLength={40} className={field} placeholder="COMP SCI 400 (blank = campus)" />
         </label>
         <label className="block space-y-1 text-sm">
-          <span className="font-medium">Trading closes</span>
+          <span className="font-medium">Trading closes (Madison time)</span>
           <input name="closes_at" type="datetime-local" required className={field} />
         </label>
       </div>

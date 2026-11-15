@@ -1,3 +1,4 @@
+import { fmtDate, fmtDateTime, fmtTime } from "@/core/time";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import { AskAnalyst } from "@/components/ask-analyst";
@@ -23,7 +24,7 @@ const ago = (iso: string) => {
   if (s < 60) return "just now";
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return new Date(iso).toLocaleDateString();
+  return fmtDate(iso);
 };
 
 export default function MarketPage({ params, searchParams }: PageProps<"/markets/[id]">) {
@@ -78,7 +79,7 @@ async function Market({
           ) : (
             market.status === "live" &&
             market.past_close && (
-              <div className="rounded-2xl border border-line bg-panel-2 p-4 text-sm"><b>Trading closed</b> on {new Date(market.closes_at).toLocaleString()}. Awaiting resolution.</div>
+              <div className="rounded-2xl border border-line bg-panel-2 p-4 text-sm"><b>Trading closed</b> {fmtDateTime(market.closes_at)}. Awaiting resolution.</div>
             )
           )}
 
@@ -89,7 +90,7 @@ async function Market({
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted">
             <span className="tabular">{fmtClout(market.volume)} Clout vol.</span>
             <span>{market.n_trades.toLocaleString()} trades</span>
-            <span>Closes {new Date(market.closes_at).toLocaleDateString()}</span>
+            <span>{market.past_close ? "Closed" : "Closes"} {fmtDateTime(market.closes_at)}</span>
             {market.resolution_source && <span className="truncate">Resolves from {market.resolution_source}</span>}
           </div>
 
@@ -273,7 +274,6 @@ function HolderGrid({ labels, holders }: { labels: string[]; holders: Awaited<Re
   );
 }
 
-const fmtTime = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 /** Union markets settle themselves: show the rule, where the data comes from, and the metric vs the threshold. */
 async function HowItSettles({ id }: { id: string }) {

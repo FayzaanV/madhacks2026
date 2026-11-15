@@ -42,9 +42,21 @@ const MARKET_SQL = `
                           ORDER BY o.outcome_index) FROM outcomes o WHERE o.market_id = m.market_id) AS outcomes
   FROM markets m LEFT JOIN resolutions r USING (market_id)`;
 
-/** Live markets from the Lakebase ledger, newest activity first. */
+/**
+ * Markets from the Lakebase ledger, most traded first. "live" = still open for trading; "awaiting" = past
+ * closes_at but not resolved yet; anything else is a raw status (resolved, final, voided...).
+ */
 export async function listMarkets(status = "live"): Promise<Market[]> {
-  const rows = await q<Market>(`${MARKET_SQL} WHERE m.status = $1 ORDER BY volume DESC`, [status]);
+  const where =
+    status === "live"
+      ? "m.status = 'live' AND m.closes_at > now()"
+      : status === "awaiting"
+        ? "m.status = 'live' AND m.closes_at <= now()"
+        : "m.status = $1";
+  const rows = await q<Market>(
+    `${MARKET_SQL} WHERE ${where} ORDER BY volume DESC`,
+    status === "live" || status === "awaiting" ? [] : [status],
+  );
   return rows.map(withPrices);
 }
 

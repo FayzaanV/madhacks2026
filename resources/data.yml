@@ -13,6 +13,18 @@ resources:
         - file:
             path: ../databricks/pipelines/gold.sql
 
+    # Union markets get their own pipeline so they can never break the leaderboard/profile refresh above.
+    union:
+      name: yomi-union-pipeline
+      catalog: ${var.catalog}
+      schema: silver
+      serverless: true
+      photon: true
+      channel: CURRENT
+      libraries:
+        - file:
+            path: ../databricks/pipelines/union.sql
+
   jobs:
     simulate_and_build:
       name: yomi-simulate-and-build
@@ -44,7 +56,7 @@ resources:
       permissions:
         - level: CAN_MANAGE_RUN
           service_principal_name: ${resources.apps.yomi.service_principal_client_id}
-      description: Union venue feed + settle, Lakebase ledger -> bronze, refresh silver/gold, then regenerate AI analyst insights.
+      description: Lakebase ledger -> bronze, refresh silver/gold (leaderboards), AI analyst insights; then the Union steps, which can fail without affecting anything before them.
       # The app also starts this job right after each resolution; queue those runs instead of skipping them.
       queue:
         enabled: true
@@ -52,19 +64,7 @@ resources:
         quartz_cron_expression: "0 0/15 * * * ?"
         timezone_id: America/Chicago
       tasks:
-        - task_key: union_feed
-          notebook_task:
-            notebook_path: ../databricks/notebooks/40_union_feed.py
-        - task_key: union_settle
-          depends_on:
-            - task_key: union_feed
-          notebook_task:
-            notebook_path: ../databricks/notebooks/42_union_settle.py
         - task_key: sync_bronze
-          depends_on:
-            - task_key: union_settle
-          # A Union problem (e.g. no Lakebase role) must never block the core refresh.
-          run_if: ALL_DONE
           notebook_task:
             notebook_path: ../databricks/notebooks/10_sync_bronze.py
             base_parameters:
@@ -83,6 +83,25 @@ resources:
             base_parameters:
               catalog: ${var.catalog}
               ai_model: ${var.ai_model}
+        # Union steps: after the core refresh, each runs whatever happened before it (run_if ALL_DONE).
+        - task_key: union_feed
+          depends_on:
+            - task_key: medallion
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: ../databricks/notebooks/40_union_feed.py
+        - task_key: union_settle
+          depends_on:
+            - task_key: union_feed
+          run_if: ALL_DONE
+          notebook_task:
+            notebook_path: ../databricks/notebooks/42_union_settle.py
+        - task_key: union_pipeline
+          depends_on:
+            - task_key: union_settle
+          run_if: ALL_DONE
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.union.id}
 
     union_markets:
       name: yomi-union-markets

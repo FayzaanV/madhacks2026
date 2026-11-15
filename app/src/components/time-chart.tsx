@@ -1,5 +1,6 @@
 "use client";
 
+import { fmtDateTime, fmtShort } from "@/core/time";
 import { useMemo, useRef, useState, type ReactNode } from "react";
 
 export type Series = { key: string; label: string; color: string; dashed?: boolean; points: { t: number; v: number | null }[] };
@@ -28,13 +29,9 @@ function valueAt(points: Series["points"], t: number): number | null {
 }
 
 /** Axis tick: clock time for short ranges, dates for long ones. */
-const fmtTick = (t: number, span: number) =>
-  span <= 2 * 86400e3
-    ? new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-    : new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const fmtTick = (t: number, span: number) => fmtShort(t, span <= 2 * 86400e3 ? 0 : Infinity);
 
-const fmtTime = (t: number) =>
-  new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+const fmtTime = (t: number) => fmtDateTime(t);
 
 /**
  * Kalshi-style history chart: range buttons, a hover crosshair, and a slider to scrub through time.

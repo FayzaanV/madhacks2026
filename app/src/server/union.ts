@@ -24,6 +24,19 @@ const METRICS = new Set(Object.keys(METRIC_LABEL));
 const SOURCE_RANK: Record<string, number> = { partner: 0, occuspace: 1, sim: 2 };
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
+/** Postgres "relation does not exist": the Union tables haven't been applied to the ledger yet (db/schema.sql). */
+const isMissingTable = (e: unknown) => (e as { code?: string })?.code === "42P01";
+
+/** Run a Union read, returning `fallback` instead of erroring while the Union tables don't exist yet. */
+export async function ifConnected<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    if (isMissingTable(e)) return fallback;
+    throw e;
+  }
+}
+
 /** Waitz-style label for an occupancy percentage (same cutoffs as databricks/lib/venues.py busy_level). */
 export const busyLevel = (pct: number | null) =>
   pct == null ? "unknown" : pct >= 75 ? "Very busy" : pct >= 45 ? "Busy" : "Not busy";
@@ -42,8 +55,12 @@ export type Venue = {
   markets: { market_id: string; question: string; yes: number; closes_at: string }[];
 };
 
-/** All venues with live data, today's history, student reports and today's open markets. */
-export async function listVenues(): Promise<Venue[]> {
+/** All venues with live data, today's history, student reports and today's open markets. null = Union not connected. */
+export function listVenues(): Promise<Venue[] | null> {
+  return ifConnected(loadVenues, null);
+}
+
+async function loadVenues(): Promise<Venue[]> {
   const [venues, latest, today, reports, markets] = await Promise.all([
     q<{ venue_id: string; name: string; building: string; capacity: number; sensor: string }>(
       "SELECT venue_id, name, building, capacity, sensor FROM venues ORDER BY building, name",
@@ -134,7 +151,11 @@ export type Rule = {
 };
 
 /** Settlement rule for a Union market plus the metric around its window (Lakebase) and its typical level (gold). */
-export async function marketRule(marketId: string): Promise<Rule | null> {
+export function marketRule(marketId: string): Promise<Rule | null> {
+  return ifConnected(() => loadRule(marketId), null);
+}
+
+async function loadRule(marketId: string): Promise<Rule | null> {
   const [r] = await q<Omit<Rule, "series" | "baseline" | "sources">>(
     `SELECT r.venue_id, v.name AS venue, r.metric, r.op, r.threshold, r.window_start, r.window_end, r.agg
      FROM market_rules r JOIN venues v USING (venue_id) WHERE r.market_id = $1`,
@@ -251,9 +272,9 @@ export async function partnerForecasts(venueIds: string[]) {
 }
 
 export async function listPartners() {
-  return q<{ partner_id: string; name: string; venue_ids: string[]; created_at: string; last_used_at: string | null; revoked_at: string | null }>(
+  return ifConnected(() => q<{ partner_id: string; name: string; venue_ids: string[]; created_at: string; last_used_at: string | null; revoked_at: string | null }>(
     "SELECT partner_id, name, venue_ids, created_at, last_used_at, revoked_at FROM partners ORDER BY created_at DESC",
-  );
+  ), []);
 }
 
 /** New partner API key. Returned once; only its hash is stored. */

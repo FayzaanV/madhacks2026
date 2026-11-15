@@ -1,3 +1,4 @@
+import { fmtTime } from "@/core/time";
 import Link from "next/link";
 import { Suspense } from "react";
 import { VenueReport } from "@/components/venue-report";
@@ -21,6 +22,16 @@ const LEVEL_STYLE: Record<string, string> = {
 
 async function Union() {
   const [venues, user] = await Promise.all([listVenues(), currentUser()]);
+  if (!venues)
+    return (
+      <div className="rounded-2xl border border-line bg-panel p-6">
+        <h1 className="text-2xl font-bold">Union</h1>
+        <p className="mt-2 text-sm text-muted">
+          Union data isn&apos;t connected yet. Once the venue tables are added to the ledger, live (simulated) venue data and daily
+          markets like &ldquo;Will the Sett be busy at 7pm?&rdquo; show up here.
+        </p>
+      </div>
+    );
   const anySim = venues.some((v) => Object.values(v.latest).some((r) => r.is_simulated));
   return (
     <div className="space-y-6">
@@ -80,7 +91,7 @@ function VenueCard({ v, signedIn }: { v: Venue; signedIn: boolean }) {
       </div>
       <p className="mt-1 text-[11px] text-muted">
         {src ? (src === "sim" ? "Simulated feed" : src === "occuspace" ? "Occuspace sensor" : "Union point of sale") : "No data in the last 30 min"}
-        {head && ` · ${new Date(head.observed_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+        {head && ` · ${fmtTime(head.observed_at)}`}
       </p>
 
       <div className="mt-3 border-t border-line pt-3 text-sm">

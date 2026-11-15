@@ -1,3 +1,4 @@
+import { fmtDateTime } from "@/core/time";
 import Link from "next/link";
 import { Suspense } from "react";
 import { PersonLine } from "@/components/avatar";
@@ -35,7 +36,7 @@ function matches(m: Market, cat: string, q: string, gapOf: Map<string, number>) 
   if (q && !`${m.question} ${m.course}`.toLowerCase().includes(q.toLowerCase())) return false;
   if (!cat) return true;
   if (cat === "mispriced") return (gapOf.get(m.market_id) ?? 0) >= 0.1;
-  if (cat === "closing") return Date.parse(m.closes_at) - Date.now() < 10 * 864e5;
+  if (cat === "closing") return Date.parse(m.closes_at) - Date.now() < 864e5; // open markets closing within 24h
   if (cat === "campus") return m.course === "campus";
   return m.course.toLowerCase().startsWith(cat.toLowerCase()) || m.course.toLowerCase().includes(`${cat.toLowerCase()} `);
 }
@@ -44,8 +45,9 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   const sp = await searchParams;
   const cat = typeof sp.cat === "string" ? sp.cat : "";
   const q = typeof sp.q === "string" ? sp.q : "";
-  const [markets, gaps, leaders, schools] = await Promise.all([
+  const [markets, awaiting, gaps, leaders, schools] = await Promise.all([
     listMarkets("live"),
+    listMarkets("awaiting"),
     querySql<Gap>(
       "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
     ).catch(() => [] as Gap[]),
@@ -112,6 +114,25 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
         </section>
       )}
 
+      {awaiting.length > 0 && !q && (
+        <section className="rounded-2xl border border-line bg-panel p-4">
+          <h2 className="font-semibold">
+            Awaiting resolution <span className="text-sm font-normal text-muted">{awaiting.length} closed, not settled yet</span>
+          </h2>
+          <ul className="mt-2 divide-y divide-line text-sm">
+            {awaiting.map((m) => (
+              <li key={m.market_id}>
+                <Link href={`/markets/${m.market_id}`} className="flex items-center gap-3 py-2 hover:text-accent">
+                  <span className="rounded bg-panel-2 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-muted">Closed</span>
+                  <span className="flex-1">{m.question}</span>
+                  <span className="text-xs text-muted">closed {fmtDateTime(m.closes_at)}</span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       <section>
         <div className="mb-3 flex items-baseline gap-3">
           <h2 className="text-xl font-bold">{q ? `Results for “${q}”` : "All markets"}</h2>
@@ -175,7 +196,7 @@ async function Featured({ m, gap }: { m: Market; gap?: Gap }) {
       </div>
       <div className="mt-3 flex items-center gap-2 text-xs text-muted">
         <span className="tabular">{fmtClout(m.volume)} Clout vol.</span>·<span>{m.n_trades.toLocaleString()} trades</span>·
-        <span>closes {new Date(m.closes_at).toLocaleDateString()}</span>
+        <span>closes {fmtDateTime(m.closes_at)}</span>
         <Link href={`/markets/${m.market_id}`} className="ml-auto rounded-lg bg-accent px-3 py-1.5 font-semibold text-accent-ink">
           Trade
         </Link>

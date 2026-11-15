@@ -1,8 +1,9 @@
+import { fmtDate } from "@/core/time";
 import Link from "next/link";
 import type { Market } from "@/server/markets";
 import { CourseIcon, Gauge, fmtClout } from "./ui";
 
-const closes = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+const closes = (iso: string) => fmtDate(iso);
 
 /** Compact board card. Binary: gauge + Yes/No. Multi: top outcomes with odds. */
 export function MarketCard({ m, smartGap }: { m: Market; smartGap?: number }) {

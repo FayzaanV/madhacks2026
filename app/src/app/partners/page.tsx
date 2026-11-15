@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { PartnerKeys } from "@/components/partner-keys";
 import { isAdmin } from "@/server/markets";
 import { q } from "@/server/ledger";
-import { canSeePartners, listPartners, unionScorecard } from "@/server/union";
+import { canSeePartners, ifConnected, listPartners, unionScorecard } from "@/server/union";
 import { currentUser } from "@/server/user";
 
 export default function PartnersPage() {
@@ -25,7 +25,7 @@ async function Partners() {
   const [{ accuracy, recent }, partners, venues] = await Promise.all([
     unionScorecard(),
     listPartners(),
-    q<{ venue_id: string; name: string }>("SELECT venue_id, name FROM venues ORDER BY name"),
+    ifConnected(() => q<{ venue_id: string; name: string }>("SELECT venue_id, name FROM venues ORDER BY name"), []),
   ]);
   const all = accuracy.find((a) => a.venue_id === "__all__");
   return (

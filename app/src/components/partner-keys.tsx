@@ -1,5 +1,6 @@
 "use client";
 
+import { fmtDateTime } from "@/core/time";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
@@ -21,7 +22,7 @@ export function PartnerKeys({ partners, venues, canManage }: { partners: P[]; ve
               <b>{p.name}</b>
               <span className="text-xs text-muted">{p.venue_ids.join(", ")}</span>
               <span className="ml-auto text-xs text-muted">
-                {p.revoked_at ? "revoked" : p.last_used_at ? `last used ${new Date(p.last_used_at).toLocaleString()}` : "never used"}
+                {p.revoked_at ? "revoked" : p.last_used_at ? `last used ${fmtDateTime(p.last_used_at)}` : "never used"}
               </span>
               {canManage && !p.revoked_at && (
                 <button

@@ -1,5 +1,6 @@
 "use client";
 
+import { fmtDateTime } from "@/core/time";
 import Link from "next/link";
 import { useState } from "react";
 import type { Comment, CommentPage } from "@/server/markets";
@@ -94,7 +95,7 @@ export function CommentList({ marketId, initial, me }: { marketId: string; initi
                 <div className="flex items-center gap-2 text-xs">
                   <PersonLine handle={c.handle} title={c.title} sim={c.is_simulated} />
                   <Clout value={c.clout} className="text-xs" />
-                  <span className="text-muted">{new Date(c.created_at).toLocaleDateString()}</span>
+                  <span className="text-muted">{fmtDateTime(c.created_at)}</span>
                   {me?.user_id === c.user_id && (
                     <button onClick={() => remove(c.comment_id)} className="ml-auto text-muted hover:text-no" aria-label="Delete comment">
                       Delete

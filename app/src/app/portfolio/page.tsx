@@ -1,3 +1,4 @@
+import { fmtDateTime } from "@/core/time";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -62,7 +63,7 @@ async function Portfolio({ searchParams }: { searchParams: Promise<Record<string
             <tbody className="divide-y divide-line">
               {trades.map((t) => (
                 <tr key={t.trade_id}>
-                  <td className="py-2 pr-3 text-xs text-muted">{new Date(t.created_at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</td>
+                  <td className="py-2 pr-3 text-xs text-muted">{fmtDateTime(t.created_at)}</td>
                   <td className="max-w-xs truncate pr-3"><Link href={`/markets/${t.market_id}`} className="hover:text-accent">{t.question}</Link></td>
                   <td className="whitespace-nowrap pr-3">
                     <span className={t.side === "buy" ? "text-yes" : "text-no"}>{t.side === "buy" ? "Bought" : "Sold"}</span> {t.shares.toFixed(1)} {t.label} @ {Math.round(t.price * 100)}¢
