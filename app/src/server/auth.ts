@@ -2,6 +2,7 @@ import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies, headers } from "next/headers";
 import { STARTING_CLOUT } from "@/core/clout";
+import { activeLook, type Look } from "@/core/cosmetics";
 import { schoolForEmail } from "@/core/universities";
 import { openStakeSql, q, tx } from "./ledger";
 
@@ -42,6 +43,7 @@ export type User = {
   is_simulated: boolean;
   title: string | null; // chosen title (validated against earned titles on display)
   avatar_v: number | null; // avatar version (epoch seconds) or null if none uploaded
+  look: Look; // shop cosmetics showing right now (core/cosmetics.ts)
 };
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -205,14 +207,18 @@ export async function setHandle(userId: string, raw: unknown): Promise<string> {
 export async function currentUser(): Promise<User | null> {
   const sid = (await cookies()).get(SESSION_COOKIE)?.value;
   if (!sid) return null;
-  const rows = await q<User>(
+  const rows = await q<Omit<User, "look"> & { cosmetics: string | null }>(
     `SELECT u.user_id, u.handle, u.email, u.school_id, u.handle_chosen_at IS NOT NULL AS handle_chosen, u.clout, u.is_simulated,
-            u.title, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, ${openStakeSql("u.user_id")} AS open_stake
+            u.title, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, ${openStakeSql("u.user_id")} AS open_stake,
+            u.cosmetics
      FROM sessions s JOIN users u USING (user_id)
      WHERE s.session_hash = $1 AND s.revoked_at IS NULL AND s.expires_at > now() AND u.deleted_at IS NULL`,
     [sha256(sid)],
   );
-  return rows[0] ?? null;
+  const r = rows[0];
+  if (!r) return null;
+  const { cosmetics, ...u } = r;
+  return { ...u, look: activeLook(cosmetics, u.clout + u.open_stake) };
 }
 
 /** For API routes: the signed-in user or a 401. */
@@ -234,7 +240,7 @@ export async function deleteAccount(userId: string): Promise<void> {
     await c.query("UPDATE comments SET deleted_at = now() WHERE user_id = $1 AND deleted_at IS NULL", [userId]);
     await c.query(
       `UPDATE users SET email = 'deleted-' || user_id || '@deleted.invalid', handle = 'deleted_user',
-                        major = NULL, dorm = NULL, club = NULL, title = NULL,
+                        major = NULL, dorm = NULL, club = NULL, title = NULL, cosmetics = NULL,
                         avatar = NULL, avatar_type = NULL, avatar_updated_at = NULL, deleted_at = now()
        WHERE user_id = $1`,
       [userId],

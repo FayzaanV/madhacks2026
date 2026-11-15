@@ -1,5 +1,7 @@
 import "server-only";
 import { prices } from "@/core/lmsr";
+import type { Look } from "@/core/cosmetics";
+import { LOOK_GROUP_BY, LOOK_SQL, withLook, type LookRow } from "./cosmetics";
 import { q } from "./ledger";
 import { querySql } from "./warehouse";
 
@@ -9,8 +11,8 @@ import { querySql } from "./warehouse";
  */
 
 /** Public identity shown next to a bet or comment: handle, avatar version, chosen title. */
-export type Person = { user_id: string; handle: string; avatar_v: number | null; title: string | null; is_simulated: boolean };
-const PERSON_SQL = `u.user_id, u.handle, u.title, u.is_simulated, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v`;
+export type Person = { user_id: string; handle: string; avatar_v: number | null; title: string | null; is_simulated: boolean; look: Look };
+const PERSON_SQL = `u.user_id, u.handle, u.title, u.is_simulated, extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, ${LOOK_SQL}`;
 
 type MarketQ = { liquidity_b: number; q: number[]; labels: string[] };
 
@@ -135,29 +137,31 @@ export async function tradeHistory(userId: string, page = 0): Promise<TradeRow[]
 
 /** Everyone's recent trades on a market (public: usernames, never emails). realOnly hides simulated demo users. */
 export async function marketActivity(marketId: string, realOnly = false): Promise<(TradeRow & Person)[]> {
-  return q<TradeRow & Person>(
+  const rows = await q<TradeRow & Omit<Person, "look"> & LookRow>(
     `SELECT ${TRADE_COLS}, ${PERSON_SQL} FROM trades t JOIN users u USING (user_id)
      WHERE t.market_id = $1 AND u.deleted_at IS NULL AND (NOT $2 OR NOT u.is_simulated)
      ORDER BY t.created_at DESC LIMIT 50`,
     [marketId, realOnly],
   );
+  return rows.map(withLook);
 }
 
 export type Holder = Person & { outcome_index: number; shares: number };
 
 /** Top 10 holders per outcome by shares held now. realOnly hides simulated demo users. */
 export async function topHolders(marketId: string, realOnly = false): Promise<Holder[]> {
-  return q<Holder>(
+  const rows = await q<Omit<Holder, "look"> & LookRow>(
     `SELECT * FROM (
        SELECT h.*, row_number() OVER (PARTITION BY h.outcome_index ORDER BY h.shares DESC) AS rn FROM (
          SELECT t.outcome_index, sum(t.shares)::float AS shares, ${PERSON_SQL}
          FROM trades t JOIN users u USING (user_id)
          WHERE t.market_id = $1 AND u.deleted_at IS NULL AND (NOT $2 OR NOT u.is_simulated)
-         GROUP BY t.outcome_index, u.user_id, u.handle, u.title, u.is_simulated, u.avatar_updated_at
+         GROUP BY t.outcome_index, u.user_id, u.handle, u.title, u.is_simulated, u.avatar_updated_at, ${LOOK_GROUP_BY}
          HAVING sum(t.shares) > 0.01) h) x
      WHERE rn <= 10 ORDER BY outcome_index, shares DESC`,
     [marketId, realOnly],
   );
+  return rows.map(withLook);
 }
 
 /** Live odds after every trade (Lakebase), downsampled to ~400 points, plus Smart Money from gold. */

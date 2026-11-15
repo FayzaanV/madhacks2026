@@ -199,6 +199,9 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar bytea;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_type text;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at timestamptz;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS title text;  -- chosen from earned titles (app/src/core/titles.ts)
+-- Shop cosmetics: JSON of equipped item ids per slot, e.g. {"hat":"hat-wizard"}. Ownership is NOT stored; it's computed
+-- from true Clout (app/src/core/cosmetics.ts), so items disappear below their threshold and come back above it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS cosmetics text;
 
 -- ------------------------------------------------------------------ Union markets (live venue data)
 -- Venues: Wisconsin Union spaces. Edit rows here for a real deployment (external_id = the Occuspace space id).

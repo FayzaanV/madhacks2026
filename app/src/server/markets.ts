@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { applySell, applyTrade, DEFAULT_B, prices, sellProceeds, sharesForProceeds } from "@/core/lmsr";
 import { canAfford, overrideDeltas, privileges, sellBasis, settlementCredits, type Winner } from "@/core/clout";
 import { latestClose, validateRule, type AutoRule } from "@/core/auto-rules";
+import { activeLook, type Look } from "@/core/cosmetics";
 import { triggerRefresh } from "./jobs";
 import { openStakeSql, q, tx } from "./ledger";
 import { clearWarehouseCache, querySql } from "./warehouse";
@@ -108,6 +109,7 @@ export type Comment = {
   avatar_v: number | null;
   is_simulated: boolean;
   clout: number;
+  look: Look; // shop cosmetics showing right now
   body: string;
   created_at: string; // ISO with microseconds, so it doubles as a paging cursor
 };
@@ -122,8 +124,8 @@ const COMMENT_PAGE = 50;
 export async function getComments(id: string, before?: string | null): Promise<CommentPage> {
   const [ts, cid] = before ? before.split("|") : [null, null];
   const [rows, total] = await Promise.all([
-    q<Comment>(
-      `SELECT c.comment_id, c.user_id, u.handle, u.title, u.is_simulated,
+    q<Omit<Comment, "look"> & { cosmetics: string | null }>(
+      `SELECT c.comment_id, c.user_id, u.handle, u.title, u.is_simulated, u.cosmetics,
               extract(epoch FROM u.avatar_updated_at)::int AS avatar_v, c.body,
               to_char(c.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS created_at,
               u.clout + ${openStakeSql("u.user_id")} AS clout
@@ -135,7 +137,7 @@ export async function getComments(id: string, before?: string | null): Promise<C
     ),
     q<{ n: number }>("SELECT count(*)::int AS n FROM comments WHERE market_id = $1 AND deleted_at IS NULL", [id]),
   ]);
-  const page = rows.slice(0, COMMENT_PAGE);
+  const page = rows.slice(0, COMMENT_PAGE).map(({ cosmetics, ...c }) => ({ ...c, look: activeLook(cosmetics, c.clout) }));
   const last = page.at(-1);
   return {
     comments: page,
