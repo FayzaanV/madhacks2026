@@ -1,12 +1,13 @@
 import { privileges } from "@/core/clout";
 import { UNIVERSITIES } from "@/core/universities";
 import Link from "next/link";
+import { overallRank } from "@/server/leaderboard";
 import { querySql } from "@/server/warehouse";
 import { displayTitle } from "@/core/titles";
 import { Avatar } from "./avatar";
 import { Clout } from "./clout";
 
-type Stats = { school_id: string | null; clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null; rank: number | null };
+type Stats = { school_id: string | null; clout: number; open_stake: number; n_trades: number; n_markets: number; brier: number | null };
 type Bin = { bucket: number; n: number; mean_forecast: number; hit_rate: number };
 
 /** Profile built from gold tables: Clout, Brier, calibration curve, flair. */
@@ -23,12 +24,11 @@ export async function Profile({
   title?: string | null;
   avatarV?: number | null;
 }) {
-  const [stats, bins, flair] = await Promise.all([
+  const [stats, bins, flair, rank] = await Promise.all([
     querySql<Stats>(
-      `SELECT c.school_id, c.clout, c.open_stake, c.n_trades, c.n_markets, b.brier, l.rank
+      `SELECT c.school_id, c.clout, c.open_stake, c.n_trades, c.n_markets, b.brier
        FROM {catalog}.gold.user_clout c
        LEFT JOIN {catalog}.gold.user_brier b USING (user_id)
-       LEFT JOIN {catalog}.gold.leaderboard l ON l.user_id = c.user_id AND l.scope = 'overall'
        WHERE c.user_id = :id`,
       { id: userId },
     ),
@@ -37,6 +37,7 @@ export async function Profile({
       { id: userId },
     ),
     querySql<{ flair: string; kind: string }>("SELECT flair, kind FROM {catalog}.gold.user_flair WHERE user_id = :id", { id: userId }),
+    overallRank(userId), // live from Lakebase
   ]);
   const s = stats[0];
   const clout = liveClout ?? s?.clout ?? 0;
@@ -67,7 +68,7 @@ export async function Profile({
       </section>
 
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Stat label="Overall rank" value={s?.rank ? `#${s.rank}` : "–"} />
+        <Stat label="Overall rank" value={rank ? `#${rank}` : "–"} />
         <Stat label="Brier score" value={s?.brier != null ? s.brier.toFixed(3) : "–"} hint="lower is better" />
         <Stat label="Trades" value={s ? `${s.n_trades} in ${s.n_markets} markets` : "0"} />
         <Stat label="Can" value={privileges(clout).join(", ")} />

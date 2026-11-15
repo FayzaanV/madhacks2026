@@ -12,10 +12,12 @@ type StatementResponse = {
 const NUMERIC = new Set(["INT", "LONG", "BIGINT", "SHORT", "BYTE", "DOUBLE", "FLOAT", "DECIMAL"]);
 
 /**
- * Gold tables only change when the refresh job runs (every 15 min, or after a resolution), so identical
+ * Gold tables only change when someone runs the manual refresh (scripts/cloud.sh refresh), so identical
  * queries within CACHE_MS share one warehouse round trip. Concurrent identical queries share one in-flight call.
  */
-const CACHE_MS = 30_000;
+// Gold only changes when someone runs the (manual) refresh, so cache long: page views rarely wake the warehouse.
+// scripts/cloud.sh refresh restarts the app afterwards, which clears this cache.
+const CACHE_MS = 30 * 60_000;
 const cache = new Map<string, { at: number; rows: Promise<unknown[]> }>();
 
 /** Drop cached gold reads, e.g. after a resolution kicks off a refresh. */
@@ -24,7 +26,7 @@ export const clearWarehouseCache = () => cache.clear();
 /**
  * Query gold tables on the Databricks SQL warehouse (Statement Execution API).
  * `{catalog}` in the SQL is replaced with the configured catalog. Use :name params for values.
- * Results are cached for 30 s; pass { fresh: true } to skip the cache.
+ * Results are cached for 30 min (see CACHE_MS); pass { fresh: true } to skip the cache.
  */
 export async function querySql<T = Record<string, unknown>>(
   sql: string,

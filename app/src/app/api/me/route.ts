@@ -1,19 +1,21 @@
 import { cookies } from "next/headers";
 import { handle, readJson } from "@/server/api";
 import { SESSION_COOKIE, deleteAccount, requireUser, setHandle } from "@/server/auth";
+import { overallRank } from "@/server/leaderboard";
 import { setTitle } from "@/server/profile";
 import { querySql } from "@/server/warehouse";
 
-/** GET /api/me -> your balance from Lakebase plus Brier/rank from the gold tables. */
+/** GET /api/me -> your balance and live rank from Lakebase, plus Brier from the gold tables. */
 export async function GET() {
   return handle(async () => {
     const u = await requireUser();
-    const gold = await querySql<{ brier: number | null; n_forecasts: number | null; rank: number | null }>(
-      `SELECT b.brier, b.n_forecasts, l.rank FROM (SELECT :id AS user_id) x
-       LEFT JOIN {catalog}.gold.user_brier b USING (user_id)
-       LEFT JOIN {catalog}.gold.leaderboard l ON l.user_id = x.user_id AND l.scope = 'overall'`,
-      { id: u.user_id },
-    ).catch(() => []);
+    const [gold, rank] = await Promise.all([
+      querySql<{ brier: number | null; n_forecasts: number | null }>(
+        "SELECT brier, n_forecasts FROM {catalog}.gold.user_brier WHERE user_id = :id",
+        { id: u.user_id },
+      ).catch(() => []),
+      overallRank(u.user_id),
+    ]);
     return Response.json({
       user_id: u.user_id,
       handle: u.handle,
@@ -23,7 +25,9 @@ export async function GET() {
       clout: u.clout + u.open_stake,
       available: u.clout,
       open_stake: u.open_stake,
-      ...(gold[0] ?? {}),
+      brier: gold[0]?.brier ?? null,
+      n_forecasts: gold[0]?.n_forecasts ?? null,
+      rank,
     });
   });
 }

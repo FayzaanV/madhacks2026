@@ -8,7 +8,8 @@ import { q } from "./ledger";
  * A lease row in Lakebase (poller_leases) makes sure only one instance (deployed app or a local dev server) runs.
  */
 const HOLDER = `${process.env.DATABRICKS_APP_NAME ?? "local"}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
-const TICK_MS = 60_000;
+// Every 5 minutes by default to save compute; set POLLER_TICK_MS lower (e.g. 60000) for a live-game demo.
+const TICK_MS = Math.max(30_000, Number(process.env.POLLER_TICK_MS ?? 300_000) || 300_000);
 const SCHEDULE_EVERY_MS = 60 * 60_000;
 
 async function holdLease(name: string): Promise<boolean> {

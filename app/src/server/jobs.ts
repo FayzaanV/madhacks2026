@@ -7,7 +7,7 @@ import { dbx, localMode } from "./databricks";
  * plus a queue exhausted the Free Edition compute quota:
  *   - at most one app-triggered run per 30 minutes (per server)
  *   - never while a run is already active or queued
- *   - REFRESH_ON_RESOLVE=0 turns it off entirely
+ *   - OFF unless REFRESH_ON_RESOLVE=1: by default leaderboards refresh only manually (scripts/cloud.sh refresh)
  * Best effort: a skipped or failed trigger never fails the resolution; the schedule catches up.
  */
 const JOB_NAME = process.env.REFRESH_JOB_NAME ?? "yomi-refresh";
@@ -23,7 +23,7 @@ async function refreshJobId(): Promise<number | null> {
 }
 
 export async function triggerRefresh(): Promise<number | null> {
-  if (process.env.REFRESH_ON_RESOLVE === "0" || localMode()) return null;
+  if (process.env.REFRESH_ON_RESOLVE !== "1" || localMode()) return null;
   if (Date.now() - lastTriggered < COOLDOWN_MS) return null;
   try {
     const id = await refreshJobId();

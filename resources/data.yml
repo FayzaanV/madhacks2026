@@ -58,7 +58,7 @@ resources:
       permissions:
         - level: CAN_MANAGE_RUN
           service_principal_name: ${resources.apps.yomi.service_principal_client_id}
-      description: Lakebase ledger -> bronze, refresh silver/gold (leaderboards), AI analyst insights; then the Union steps, which can fail without affecting anything before them.
+      description: Lakebase ledger -> bronze, refresh silver/gold (Brier, calibration, Smart Money, charts) and campus weather. Leaderboards are live from Lakebase; AI insights are a separate manual job (yomi-ai-insights).
       # Compute budget (Free Edition): one run at a time, extra triggers are DROPPED (not queued), every 30 min.
       # PAUSED after the quota ran out on 2026-11-14; set UNPAUSED here (and deploy) once compute is back.
       queue:
@@ -80,14 +80,6 @@ resources:
             - task_key: sync_bronze
           pipeline_task:
             pipeline_id: ${resources.pipelines.medallion.id}
-        - task_key: ai_analyst
-          depends_on:
-            - task_key: medallion
-          notebook_task:
-            notebook_path: ../databricks/notebooks/30_ai_analyst_batch.py
-            base_parameters:
-              catalog: ${var.catalog}
-              ai_model: ${var.ai_model}
         # Campus weather: Open-Meteo values for weather markets whose day has ended (the app settles from them).
         - task_key: campus_weather
           depends_on:
@@ -95,6 +87,22 @@ resources:
           run_if: ALL_DONE
           notebook_task:
             notebook_path: ../databricks/notebooks/20_campus_weather.py
+
+    # AI market insights (one ai_query per market, max 20 per run): manual only, to save compute.
+    # Run with `scripts/cloud.sh refresh --ai` or `databricks bundle run ai_insights`.
+    ai_insights:
+      name: yomi-ai-insights
+      description: Batch AI analyst insights for the busiest live markets (manual).
+      queue:
+        enabled: false
+      max_concurrent_runs: 1
+      tasks:
+        - task_key: ai_analyst
+          notebook_task:
+            notebook_path: ../databricks/notebooks/30_ai_analyst_batch.py
+            base_parameters:
+              catalog: ${var.catalog}
+              ai_model: ${var.ai_model}
 
     # Union venue feed + settlement + pipeline: its own job so it never adds to the core refresh. Hourly, PAUSED
     # until the team decides to spend compute on it.

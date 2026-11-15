@@ -3,7 +3,7 @@ import { Suspense } from "react";
 import { Avatar } from "@/components/avatar";
 import { Clout } from "@/components/clout";
 import { UNIVERSITIES } from "@/core/universities";
-import { querySql } from "@/server/warehouse";
+import { isScope, leaderboard, schoolLeague, scopeValues } from "@/server/leaderboard";
 
 type Row = {
   user_id: string;
@@ -59,10 +59,8 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
   const sp = await searchParams;
   const scope = SCOPES.some((s) => s.key === sp.scope) ? (sp.scope as string) : "league";
 
-  const league = await querySql<School>(
-    `SELECT school_id, name, short_name, color, forecasters, avg_clout, avg_brier, top_clout, rank
-     FROM {catalog}.gold.school_rankings ORDER BY rank`,
-  ).catch(() => [] as School[]);
+  // Live from the Lakebase ledger (plain SQL sort, no warehouse): see server/leaderboard.ts.
+  const league: School[] = await schoolLeague();
 
   const tabs = (
     <nav className="flex flex-wrap gap-1.5 text-sm">
@@ -80,24 +78,11 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
 
   if (scope === "league") return <>{tabs}<League rows={league} /></>;
 
-  const values =
-    scope === "overall"
-      ? [{ scope_value: "all" }]
-      : scope === "school"
-        ? league.map((s) => ({ scope_value: s.school_id }))
-        : await querySql<{ scope_value: string }>(
-            "SELECT DISTINCT scope_value FROM {catalog}.gold.leaderboard WHERE scope = :scope ORDER BY scope_value",
-            { scope },
-          );
+  if (!isScope(scope)) return <>{tabs}<League rows={league} /></>;
+  const values = (scope === "school" ? league.map((s) => s.school_id) : await scopeValues(scope)).map((v) => ({ scope_value: v }));
   const value =
     typeof sp.value === "string" && values.some((v) => v.scope_value === sp.value) ? sp.value : (values[0]?.scope_value ?? "all");
-  const sql = (order: string, limit: number) =>
-    `SELECT user_id, handle, school_id, clout, brier, n_trades, rank, rank_from_bottom FROM {catalog}.gold.leaderboard
-     WHERE scope = :scope AND scope_value = :value ORDER BY ${order} LIMIT ${limit}`;
-  const [top, shame] = await Promise.all([
-    querySql<Row>(sql("rank", 25), { scope, value }),
-    querySql<Row>(sql("rank_from_bottom", 10), { scope, value }),
-  ]);
+  const { top, shame }: { top: Row[]; shame: Row[] } = await leaderboard(scope, value);
   const title = scope === "school" ? (schoolMeta.get(value)?.name ?? schoolName(value)) : scope === "overall" ? "All students, every university" : value;
 
   return (

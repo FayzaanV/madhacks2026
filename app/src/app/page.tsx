@@ -8,6 +8,7 @@ import { OddsChart } from "@/components/odds-chart";
 import { CourseIcon, fmtClout } from "@/components/ui";
 import { listMarkets, type Market } from "@/server/markets";
 import { oddsSeries } from "@/server/portfolio";
+import { leaderboard, schoolLeague } from "@/server/leaderboard";
 import { querySql } from "@/server/warehouse";
 
 type Gap = { market_id: string; question: string; course: string; gap: number; crowd_price: number; smart_price: number; outcome_label: string };
@@ -53,13 +54,9 @@ async function Board({ searchParams }: { searchParams: Promise<Record<string, st
     querySql<Gap>(
       "SELECT market_id, question, course, gap, crowd_price, smart_price, outcome_label FROM {catalog}.gold.market_mispricing WHERE status = 'live' ORDER BY gap DESC",
     ).catch(() => [] as Gap[]),
-    querySql<Leader>(
-      `SELECT l.user_id, l.handle, l.clout, l.rank, c.is_simulated FROM {catalog}.gold.leaderboard l
-       JOIN {catalog}.gold.user_clout c USING (user_id) WHERE l.scope = 'overall' ORDER BY l.rank LIMIT 5`,
-    ).catch(() => [] as Leader[]),
-    querySql<SchoolRank>(
-      "SELECT school_id, short_name, color, avg_clout, rank FROM {catalog}.gold.school_rankings ORDER BY rank LIMIT 5",
-    ).catch(() => [] as SchoolRank[]),
+    // Live from the Lakebase ledger (plain SQL sort, no warehouse): server/leaderboard.ts
+    leaderboard("overall", "all", 5, 0).then((r): Leader[] => r.top),
+    schoolLeague().then((rows): SchoolRank[] => rows.slice(0, 5)),
   ]);
   const gapOf = new Map(gaps.map((g) => [g.market_id, g.gap]));
   const shown = markets.filter((m) => matches(m, cat, q, gapOf));
