@@ -2,7 +2,9 @@
 // Run SQL against the Lakebase ledger as yourself (Databricks CLI DEFAULT profile).
 //   node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"
 //   node app/scripts/ledger-sql.mjs grant-app <service-principal-client-id>
+//   node app/scripts/ledger-sql.mjs --file db/schema.sql      (works the same in Windows PowerShell)
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import pg from "pg";
 
 const ENDPOINT = process.env.LAKEBASE_ENDPOINT ?? "projects/the-curve-ledger/branches/production/endpoints/primary";
@@ -16,7 +18,7 @@ const client = new pg.Client({
 });
 await client.connect();
 
-let sql = process.argv.slice(2).join(" ");
+let sql = process.argv[2] === "--file" ? readFileSync(process.argv[3], "utf8") : process.argv.slice(2).join(" ");
 if (process.argv[2] === "grant-app") {
   const sp = process.argv[3];
   if (!sp) throw new Error("usage: grant-app <service-principal-client-id>");

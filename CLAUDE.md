@@ -272,7 +272,7 @@ There is **one shared deployment** (bundle target `prod`, the default), at `/Wor
 ```
 python3 scripts/dbsql.py "SELECT * FROM the_curve.gold.leaderboard LIMIT 5"   # SQL on the warehouse
 node app/scripts/ledger-sql.mjs "SELECT count(*) FROM trades"                # SQL on Lakebase
-node app/scripts/ledger-sql.mjs "$(cat db/schema.sql)"                      # apply schema changes (idempotent, keeps data)
+node app/scripts/ledger-sql.mjs --file db/schema.sql                         # apply schema changes (idempotent, keeps data; any OS)
 databricks bundle run simulate_and_build   # rebuild sim data — TRUNCATES the ledger (all accounts + bets). Team agreement only.
 databricks bundle run refresh              # sync + pipeline + AI insights (also runs every 15 min)
 databricks bundle run yomi                 # rebuild + restart the website
