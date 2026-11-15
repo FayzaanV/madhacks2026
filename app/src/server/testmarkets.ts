@@ -106,20 +106,14 @@ export async function settleDueTestMarkets() {
 let lastTick = 0;
 
 /**
- * Background activity, at most once a minute per server: settle due test markets and add 1-3 simulated bets to
- * open ones so prices keep moving. Triggered by page views (POST /api/sim/tick); cheap when there's nothing to do.
+ * Background activity, at most once a minute per server: settle due test markets, then let the simulated trading
+ * agents (server/agents.ts) trade simulated markets so their odds keep moving. Runs from the background poller and
+ * from POST /api/sim/tick (page views) as a backup; cheap when there's nothing to do.
  */
 export async function simTick() {
   if (Date.now() - lastTick < 60e3) return { skipped: true };
   lastTick = Date.now();
   const { settled } = await settleDueTestMarkets();
-  const open = await q<{ market_id: string; n: number }>(
-    `SELECT m.market_id, (SELECT count(*)::int FROM outcomes o WHERE o.market_id = m.market_id) AS n
-     FROM markets m WHERE m.course = $1 AND m.status = 'live' AND m.closes_at > now() + interval '1 minute'
-     ORDER BY random() LIMIT 3`,
-    [TEST_COURSE],
-  );
-  const traders = await simTraders(open.length);
-  await Promise.all(open.map((m, i) => traders[i] && simBet(traders[i].user_id, m.market_id, hiddenLean(m.n))));
-  return { settled, bets: Math.min(open.length, traders.length) };
+  const agents = await (await import("./agents")).agentTick();
+  return { settled, agents };
 }
